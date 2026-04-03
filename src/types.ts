@@ -15,6 +15,7 @@ export type Expense = {
   category: string;
   emoji: string;
   date: string;
+  comment?: string;
 };
 
 export type HistoryGroup = {

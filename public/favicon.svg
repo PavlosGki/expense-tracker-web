@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Expense Tracker">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0074e8" />
+      <stop offset="100%" stop-color="#32d74b" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="#0b0f14" />
+  <rect x="8" y="8" width="48" height="48" rx="14" fill="url(#bg)" />
+  <path d="M20 40h24" stroke="#fff" stroke-width="5" stroke-linecap="round" />
+  <path d="M24 30l6 6 12-14" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

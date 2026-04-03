@@ -64,6 +64,7 @@ type ExpenseDraft = {
   category: string;
   emoji: string;
   date: string;
+  comment: string;
 };
 
 const PRESET_BACKGROUNDS = [
@@ -136,6 +137,7 @@ export default function App() {
     category: DEFAULT_CATEGORIES[0].name,
     emoji: DEFAULT_CATEGORIES[0].emoji,
     date: toLocalIsoDate(new Date()),
+    comment: '',
   });
   const [isAddingCustomCategory, setIsAddingCustomCategory] = useState(false);
   const [customCategoryName, setCustomCategoryName] = useState('');
@@ -191,6 +193,7 @@ export default function App() {
       category: DEFAULT_CATEGORIES[0].name,
       emoji: DEFAULT_CATEGORIES[0].emoji,
       date: toLocalIsoDate(new Date()),
+      comment: '',
     });
     setIsAddingCustomCategory(false);
     setCustomCategoryName('');
@@ -205,6 +208,7 @@ export default function App() {
       category: expense.category,
       emoji: expense.emoji,
       date: expense.date,
+      comment: expense.comment ?? '',
     });
     setIsAddingCustomCategory(false);
     setCustomCategoryName('');
@@ -248,6 +252,7 @@ export default function App() {
       category: categoryName,
       emoji: categoryEmoji,
       date: draft.date,
+      comment: draft.comment.trim(),
     };
 
     setExpenses((prev) => {
@@ -461,7 +466,7 @@ export default function App() {
                               <span className="expense-emoji">{expense.emoji}</span>
                               <span className="expense-copy">
                                 <strong>{getLocalizedCategoryName(locale, expense.category)}</strong>
-                                <small>{expense.date}</small>
+                                <small>{expense.comment?.trim() ? `${expense.date} • ${expense.comment.trim()}` : expense.date}</small>
                               </span>
                               <strong>{expense.amount} €</strong>
                             </button>
@@ -751,6 +756,15 @@ export default function App() {
             <label>
               <span>{t(locale, 'date')}</span>
               <input type="date" value={draft.date} onChange={(event) => setDraft((prev) => ({ ...prev, date: event.target.value }))} />
+            </label>
+
+            <label>
+              <span>{t(locale, 'comment')}</span>
+              <input
+                value={draft.comment}
+                onChange={(event) => setDraft((prev) => ({ ...prev, comment: event.target.value }))}
+                placeholder={t(locale, 'commentPlaceholder')}
+              />
             </label>
 
             {selectedCategory?.isDefault !== true && !isAddingCustomCategory && (
