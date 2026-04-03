@@ -9,12 +9,13 @@ function escapeCsvField(value: string) {
 }
 
 export function buildCsv(expenses: Expense[], locale: Locale) {
-  const headers = [t(locale, 'csvHeaderDate'), t(locale, 'csvHeaderCategory'), t(locale, 'csvHeaderAmount')];
+  const headers = [t(locale, 'csvHeaderDate'), t(locale, 'project'), t(locale, 'csvHeaderCategory'), t(locale, 'csvHeaderAmount')];
   return [
     headers.join(','),
     ...expenses.map((expense) =>
       [
         escapeCsvField(expense.date),
+        escapeCsvField(expense.project ?? ''),
         escapeCsvField(getLocalizedCategoryName(locale, expense.category)),
         escapeCsvField(expense.amount),
       ].join(',')

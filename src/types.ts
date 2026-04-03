@@ -9,6 +9,11 @@ export type Category = {
   isDefault?: boolean;
 };
 
+export type Project = {
+  id: string;
+  name: string;
+};
+
 export type Expense = {
   id: string;
   amount: string;
@@ -16,6 +21,7 @@ export type Expense = {
   emoji: string;
   date: string;
   comment?: string;
+  project?: string;
 };
 
 export type HistoryGroup = {

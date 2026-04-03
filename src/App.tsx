@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import './styles.css';
 import { buildCsv, downloadCsv, parseCsvRows } from './lib/csv';
 import {
@@ -17,6 +17,7 @@ import {
   loadFilter,
   loadIncome,
   loadLocale,
+  loadProjects,
   loadRange,
   saveBackground,
   saveCategories,
@@ -24,10 +25,11 @@ import {
   saveFilter,
   saveIncome,
   saveLocale,
+  saveProjects,
   saveRange,
   type StoredBackground,
 } from './lib/storage';
-import type { Category, Expense, Locale, Range, TabId } from './types';
+import type { Category, Expense, Locale, Project, Range, TabId } from './types';
 
 const DEFAULT_CATEGORIES: Category[] = [
   { id: 'c1', name: 'Φαγητό', emoji: '🍔', isDefault: true },
@@ -58,8 +60,13 @@ const DEFAULT_CATEGORIES: Category[] = [
 
 const RANGE_OPTIONS: Range[] = ['day', 'week', 'month', 'year'];
 const NEW_CATEGORY_VALUE = '__new_category__';
+const NO_PROJECT_VALUE = '__no_project__';
+const ALL_CATEGORIES_VALUE = '__all_categories__';
+const ALL_PROJECTS_VALUE = '__all_projects__';
+const WITHOUT_PROJECT_VALUE = '__without_project__';
 
 type ExpenseDraft = {
+  project: string;
   amount: string;
   category: string;
   emoji: string;
@@ -120,35 +127,49 @@ export default function App() {
   const [tab, setTab] = useState<TabId>('home');
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [customCategories, setCustomCategories] = useState<Category[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [income, setIncome] = useState(0);
   const [budgetInputValue, setBudgetInputValue] = useState('0');
   const [range, setRange] = useState<Range>('month');
   const [background, setBackground] = useState<StoredBackground>({ type: 'preset', value: 'default' });
   const [fromDate, setFromDate] = useState<string>('');
   const [toDate, setToDate] = useState<string>('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('');
+  const [projectFilter, setProjectFilter] = useState<string>('');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [expenseModalOpen, setExpenseModalOpen] = useState(false);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false);
+  const [projectModalOpen, setProjectModalOpen] = useState(false);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [categoryModalForExpense, setCategoryModalForExpense] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [swipedExpenseId, setSwipedExpenseId] = useState<string | null>(null);
+  const [swipedManageId, setSwipedManageId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ExpenseDraft>({
+    project: '',
     amount: '',
     category: DEFAULT_CATEGORIES[0].name,
     emoji: DEFAULT_CATEGORIES[0].emoji,
     date: toLocalIsoDate(new Date()),
     comment: '',
   });
-  const [isAddingCustomCategory, setIsAddingCustomCategory] = useState(false);
-  const [customCategoryName, setCustomCategoryName] = useState('');
-  const [customCategoryEmoji, setCustomCategoryEmoji] = useState('🏷️');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryEmoji, setNewCategoryEmoji] = useState('🏷️');
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
+  const manageSwipeStartRef = useRef<{ id: string; x: number } | null>(null);
 
   useEffect(() => {
     setLocale(loadLocale());
     setExpenses(loadExpenses());
     setCustomCategories(loadCategories());
+    setProjects(loadProjects());
     const savedIncome = loadIncome();
     setIncome(savedIncome);
     setBudgetInputValue(String(savedIncome));
@@ -157,19 +178,25 @@ export default function App() {
     const filter = loadFilter();
     setFromDate(filter.fromIso ?? '');
     setToDate(filter.toIso ?? '');
+    setCategoryFilter(filter.category ?? '');
+    setProjectFilter(filter.project ?? '');
   }, []);
 
   useEffect(() => saveLocale(locale), [locale]);
   useEffect(() => saveExpenses(expenses), [expenses]);
   useEffect(() => saveCategories(customCategories), [customCategories]);
+  useEffect(() => saveProjects(projects), [projects]);
   useEffect(() => saveIncome(income), [income]);
   useEffect(() => {
     setBudgetInputValue(String(income));
   }, [income]);
   useEffect(() => saveRange(range), [range]);
   useEffect(() => saveBackground(background), [background]);
-  useEffect(() => saveFilter({ fromIso: fromDate || null, toIso: toDate || null }), [fromDate, toDate]);
-  useEffect(() => setExpandedGroups({}), [range, fromDate, toDate]);
+  useEffect(
+    () => saveFilter({ fromIso: fromDate || null, toIso: toDate || null, category: categoryFilter || null, project: projectFilter || null }),
+    [fromDate, toDate, categoryFilter, projectFilter]
+  );
+  useEffect(() => setExpandedGroups({}), [range, fromDate, toDate, categoryFilter, projectFilter]);
   useEffect(() => {
     const cssBackground = getBackgroundCss(background);
     document.body.style.background = cssBackground;
@@ -180,45 +207,76 @@ export default function App() {
   const displayCategories = useMemo(() => withDisplayName(locale, allCategories), [locale, allCategories]);
   const filterFromDate = fromDate ? parseIsoDateToLocal(fromDate) : null;
   const filterToDate = toDate ? parseIsoDateToLocal(toDate) : null;
-  const totals = useMemo(() => getExpensePeriodTotals(expenses), [expenses]);
-  const filteredExpenses = useMemo(() => filterExpensesByDateRange(expenses, filterFromDate, filterToDate), [expenses, filterFromDate, filterToDate]);
-  const historyGroups = useMemo(() => getHistoryGroups(expenses, range, filterFromDate, filterToDate, locale), [expenses, range, filterFromDate, filterToDate, locale]);
-  const analyticsGroups = useMemo(() => getAnalyticsGroups(expenses, range, filterFromDate, filterToDate, locale), [expenses, range, filterFromDate, filterToDate, locale]);
-  const hasDateFilter = Boolean(fromDate || toDate);
+  const categoryFilterLabel =
+    displayCategories.find((category) => category.name === categoryFilter)?.displayName ?? categoryFilter;
+  const projectFilterLabel =
+    projectFilter === WITHOUT_PROJECT_VALUE ? t(locale, 'withoutProject') : projectFilter || t(locale, 'allProjects');
+  const metaFilteredExpenses = useMemo(
+    () =>
+      expenses.filter((expense) => {
+        if (categoryFilter && expense.category !== categoryFilter) return false;
+        if (projectFilter === WITHOUT_PROJECT_VALUE) return !expense.project;
+        if (projectFilter && (expense.project ?? '') !== projectFilter) return false;
+        return true;
+      }),
+    [expenses, categoryFilter, projectFilter]
+  );
+  const filteredExpenses = useMemo(
+    () => filterExpensesByDateRange(metaFilteredExpenses, filterFromDate, filterToDate),
+    [metaFilteredExpenses, filterFromDate, filterToDate]
+  );
+  const totals = useMemo(() => getExpensePeriodTotals(filteredExpenses), [filteredExpenses]);
+  const historyGroups = useMemo(
+    () => getHistoryGroups(metaFilteredExpenses, range, filterFromDate, filterToDate, locale),
+    [metaFilteredExpenses, range, filterFromDate, filterToDate, locale]
+  );
+  const analyticsGroups = useMemo(
+    () => getAnalyticsGroups(metaFilteredExpenses, range, filterFromDate, filterToDate, locale),
+    [metaFilteredExpenses, range, filterFromDate, filterToDate, locale]
+  );
+  const hasActiveFilter = Boolean(fromDate || toDate || categoryFilter || projectFilter);
 
   const openAddExpense = () => {
     setEditingExpense(null);
     setDraft({
+      project: '',
       amount: '',
       category: DEFAULT_CATEGORIES[0].name,
       emoji: DEFAULT_CATEGORIES[0].emoji,
       date: toLocalIsoDate(new Date()),
       comment: '',
     });
-    setIsAddingCustomCategory(false);
-    setCustomCategoryName('');
-    setCustomCategoryEmoji('');
     setExpenseModalOpen(true);
   };
 
   const openEditExpense = (expense: Expense) => {
     setEditingExpense(expense);
     setDraft({
+      project: expense.project ?? '',
       amount: expense.amount,
       category: expense.category,
       emoji: expense.emoji,
       date: expense.date,
       comment: expense.comment ?? '',
     });
-    setIsAddingCustomCategory(false);
-    setCustomCategoryName('');
-    setCustomCategoryEmoji('');
     setExpenseModalOpen(true);
   };
 
   const closeExpenseModal = () => {
     setExpenseModalOpen(false);
     setEditingExpense(null);
+  };
+
+  const openProjectModal = () => {
+    setNewProjectName('');
+    setProjectModalOpen(true);
+  };
+
+  const openCategoryModal = (fromExpense = false) => {
+    setNewCategoryName('');
+    setNewCategoryEmoji('🏷️');
+    setCategoryModalForExpense(fromExpense);
+    setCategoryModalOpen(true);
   };
 
   const handleSaveExpense = (event: FormEvent<HTMLFormElement>) => {
@@ -229,22 +287,8 @@ export default function App() {
       return;
     }
 
-    let categoryName = draft.category;
-    let categoryEmoji = draft.emoji || '🏷️';
-
-    if (isAddingCustomCategory) {
-      const trimmedName = customCategoryName.trim();
-      if (!trimmedName) {
-        window.alert(t(locale, 'invalidCategory'));
-        return;
-      }
-      categoryName = trimmedName;
-      categoryEmoji = customCategoryEmoji.trim() || '🏷️';
-      const alreadyExists = allCategories.some((category) => category.name === trimmedName);
-      if (!alreadyExists) {
-        setCustomCategories((prev) => [...prev, { id: `custom_${Date.now()}`, name: trimmedName, emoji: categoryEmoji }]);
-      }
-    }
+    const categoryName = draft.category;
+    const categoryEmoji = draft.emoji || '🏷️';
 
     const nextExpense: Expense = {
       id: editingExpense?.id ?? String(Date.now()),
@@ -253,6 +297,7 @@ export default function App() {
       emoji: categoryEmoji,
       date: draft.date,
       comment: draft.comment.trim(),
+      project: draft.project || undefined,
     };
 
     setExpenses((prev) => {
@@ -283,6 +328,22 @@ export default function App() {
     setExpenses((prev) => prev.filter((expense) => expense.id !== id));
   };
 
+  const handleManageTouchStart = (id: string, clientX: number) => {
+    manageSwipeStartRef.current = { id, x: clientX };
+  };
+
+  const handleManageTouchEnd = (id: string, clientX: number) => {
+    const swipe = manageSwipeStartRef.current;
+    if (!swipe || swipe.id !== id) return;
+    const deltaX = clientX - swipe.x;
+    if (deltaX <= -60) {
+      setSwipedManageId(id);
+    } else if (deltaX >= 30 || swipedManageId === id) {
+      setSwipedManageId(null);
+    }
+    manageSwipeStartRef.current = null;
+  };
+
   const handleDeleteCategory = (id: string) => {
     setCustomCategories((prev) => prev.filter((category) => category.id !== id));
   };
@@ -290,6 +351,111 @@ export default function App() {
   const handleDeleteCategoryFromSettings = (id: string) => {
     if (!window.confirm(t(locale, 'deleteCategoryConfirm'))) return;
     handleDeleteCategory(id);
+  };
+
+  const handleDeleteProjectFromSettings = (id: string) => {
+    if (!window.confirm(t(locale, 'deleteProjectConfirm'))) return;
+    const projectToDelete = projects.find((project) => project.id === id);
+    setProjects((prev) => prev.filter((project) => project.id !== id));
+    if (projectToDelete) {
+      setExpenses((prev) =>
+        prev.map((expense) => (expense.project === projectToDelete.name ? { ...expense, project: undefined } : expense))
+      );
+      if (draft.project === projectToDelete.name) {
+        setDraft((prev) => ({ ...prev, project: '' }));
+      }
+    }
+  };
+
+  const handleAddProject = () => {
+    const trimmedName = newProjectName.trim();
+    if (!trimmedName) {
+      window.alert(t(locale, 'invalidProject'));
+      return;
+    }
+    if (projects.some((project) => project.name === trimmedName)) {
+      setNewProjectName('');
+      return;
+    }
+    setProjects((prev) => [...prev, { id: `project_${Date.now()}`, name: trimmedName }]);
+    setNewProjectName('');
+    setProjectModalOpen(false);
+  };
+
+  const handleAddCategory = () => {
+    const trimmedName = newCategoryName.trim();
+    if (!trimmedName) {
+      window.alert(t(locale, 'invalidCategory'));
+      return;
+    }
+    if (allCategories.some((category) => category.name === trimmedName)) {
+      setNewCategoryName('');
+      return;
+    }
+    setCustomCategories((prev) => [
+      ...prev,
+      { id: `custom_${Date.now()}`, name: trimmedName, emoji: newCategoryEmoji.trim() || '🏷️' },
+    ]);
+    if (categoryModalForExpense) {
+      setDraft((prev) => ({
+        ...prev,
+        category: trimmedName,
+        emoji: newCategoryEmoji.trim() || '🏷️',
+      }));
+    }
+    setNewCategoryName('');
+    setNewCategoryEmoji('🏷️');
+    setCategoryModalOpen(false);
+    setCategoryModalForExpense(false);
+  };
+
+  const handleRenameCategory = (id: string) => {
+    const trimmedName = editingCategoryName.trim();
+    if (!trimmedName) {
+      window.alert(t(locale, 'invalidCategory'));
+      return;
+    }
+    const currentCategory = customCategories.find((category) => category.id === id);
+    if (!currentCategory) return;
+    setCustomCategories((prev) => prev.map((category) => (category.id === id ? { ...category, name: trimmedName } : category)));
+    setExpenses((prev) =>
+      prev.map((expense) => (expense.category === currentCategory.name ? { ...expense, category: trimmedName } : expense))
+    );
+    if (draft.category === currentCategory.name) {
+      setDraft((prev) => ({ ...prev, category: trimmedName }));
+    }
+    setEditingCategoryId(null);
+    setEditingCategoryName('');
+  };
+
+  const handleRenameProject = (id: string) => {
+    const trimmedName = editingProjectName.trim();
+    if (!trimmedName) {
+      window.alert(t(locale, 'invalidProject'));
+      return;
+    }
+    const currentProject = projects.find((project) => project.id === id);
+    if (!currentProject) return;
+    setProjects((prev) => prev.map((project) => (project.id === id ? { ...project, name: trimmedName } : project)));
+    setExpenses((prev) =>
+      prev.map((expense) => (expense.project === currentProject.name ? { ...expense, project: trimmedName } : expense))
+    );
+    if (draft.project === currentProject.name) {
+      setDraft((prev) => ({ ...prev, project: trimmedName }));
+    }
+    setEditingProjectId(null);
+    setEditingProjectName('');
+  };
+
+  const handleManageInputKeyDown = (event: KeyboardEvent<HTMLInputElement>, action: () => void, cancel?: () => void) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      action();
+    }
+    if (event.key === 'Escape' && cancel) {
+      event.preventDefault();
+      cancel();
+    }
   };
 
   const handleExportCsv = () => {
@@ -312,6 +478,7 @@ export default function App() {
 
     const header = rows[0].map((value) => value.trim().toLowerCase());
     const dateIndex = header.findIndex((value) => value === 'ημερομηνία' || value === 'date');
+    const projectIndex = header.findIndex((value) => value === 'project');
     const categoryIndex = header.findIndex((value) => value === 'κατηγορία' || value === 'category');
     const amountIndex = header.findIndex((value) => value === 'ποσό' || value === 'amount');
 
@@ -326,6 +493,7 @@ export default function App() {
 
     rows.slice(1).forEach((row, index) => {
       const date = (row[dateIndex] ?? '').trim();
+      const project = projectIndex === -1 ? '' : (row[projectIndex] ?? '').trim();
       const category = (row[categoryIndex] ?? '').trim();
       const amountRaw = (row[amountIndex] ?? '').trim().replace(',', '.');
       const amount = Number.parseFloat(amountRaw);
@@ -346,6 +514,7 @@ export default function App() {
         category,
         emoji: allCategories.find((item) => item.name === category)?.emoji ?? '🏷️',
         date,
+        project: project || undefined,
       });
     });
 
@@ -355,7 +524,6 @@ export default function App() {
     window.alert(t(locale, 'importDone'));
   };
 
-  const selectedCategory = allCategories.find((category) => category.name === draft.category);
   const currentMonthSpend = totals.month;
   const balance = income - currentMonthSpend;
   const progressPct = income > 0 ? Math.min(100, Math.max(0, (currentMonthSpend / income) * 100)) : 0;
@@ -412,13 +580,14 @@ export default function App() {
             <section className="toolbar-row">
               <div className="toolbar-title">
                 <h3>{tab === 'analytics' ? t(locale, 'byCategory') : t(locale, 'history')}</h3>
-                <button className={`icon-btn ${hasDateFilter ? 'active' : ''}`} onClick={() => setFilterModalOpen(true)}>
+                <button className={`icon-btn ${hasActiveFilter ? 'active' : ''}`} onClick={() => setFilterModalOpen(true)}>
                   ☰
                 </button>
               </div>
-              {hasDateFilter && (
+              {hasActiveFilter && (
                 <p className="filter-pill">
-                  {t(locale, 'filterActive')}: {fromDate || '—'} / {toDate || '—'}
+                  {t(locale, 'filterActive')}: {fromDate || '—'} / {toDate || '—'} / {categoryFilterLabel || t(locale, 'allCategories')} /{' '}
+                  {projectFilterLabel}
                 </p>
               )}
             </section>
@@ -466,7 +635,9 @@ export default function App() {
                               <span className="expense-emoji">{expense.emoji}</span>
                               <span className="expense-copy">
                                 <strong>{getLocalizedCategoryName(locale, expense.category)}</strong>
-                                <small>{expense.comment?.trim() ? `${expense.date} • ${expense.comment.trim()}` : expense.date}</small>
+                                <small>
+                                  {[expense.project, expense.date, expense.comment?.trim()].filter(Boolean).join(' • ')}
+                                </small>
                               </span>
                               <strong>{expense.amount} €</strong>
                             </button>
@@ -600,20 +771,164 @@ export default function App() {
               </div>
             </section>
             <section className="panel">
-              <h3>{t(locale, 'manageCategories')}</h3>
+              <div className="settings-header">
+                <h3>{t(locale, 'projects')}</h3>
+                <button className="ghost-btn" onClick={openProjectModal}>
+                  {t(locale, 'add')}
+                </button>
+              </div>
+              <div className="category-manage-list">
+                {projects.length === 0 ? (
+                  <p className="empty-line">{t(locale, 'noProjects')}</p>
+                ) : (
+                  projects.map((project) => (
+                    <div key={project.id} className={`expense-swipe ${swipedManageId === `project_${project.id}` ? 'open' : ''}`}>
+                      <button className="expense-delete-action" onClick={() => handleDeleteProjectFromSettings(project.id)}>
+                        {t(locale, 'delete')}
+                      </button>
+                      <div
+                        className="category-manage-row editable-row expense-main manage-main"
+                        onTouchStart={(event) => handleManageTouchStart(`project_${project.id}`, event.changedTouches[0].clientX)}
+                        onTouchEnd={(event) => handleManageTouchEnd(`project_${project.id}`, event.changedTouches[0].clientX)}
+                        onClick={() => {
+                          if (swipedManageId === `project_${project.id}`) {
+                            setSwipedManageId(null);
+                            return;
+                          }
+                        }}
+                      >
+                        {editingProjectId === project.id ? (
+                          <>
+                            <div className="category-manage-copy">
+                              <input
+                                value={editingProjectName}
+                                onChange={(event) => setEditingProjectName(event.target.value)}
+                                onClick={(event) => event.stopPropagation()}
+                                onBlur={() => handleRenameProject(project.id)}
+                                onKeyDown={(event) =>
+                                  handleManageInputKeyDown(
+                                    event,
+                                    () => handleRenameProject(project.id),
+                                    () => {
+                                      setEditingProjectId(null);
+                                      setEditingProjectName('');
+                                    }
+                                  )
+                                }
+                                autoFocus
+                              />
+                            </div>
+                            <button
+                              className="mini-icon-btn"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleRenameProject(project.id);
+                              }}
+                            >
+                              ✓
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <div className="category-manage-copy">
+                              <strong>{project.name}</strong>
+                            </div>
+                            <button
+                              className="mini-icon-btn"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setEditingProjectId(project.id);
+                                setEditingProjectName(project.name);
+                              }}
+                            >
+                              ✎
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+            <section className="panel">
+              <div className="settings-header">
+                <h3>{t(locale, 'manageCategories')}</h3>
+                <button className="ghost-btn" onClick={() => openCategoryModal(false)}>
+                  {t(locale, 'add')}
+                </button>
+              </div>
               <div className="category-manage-list">
                 {customCategories.length === 0 ? (
                   <p className="empty-line">{t(locale, 'noCustomCategories')}</p>
                 ) : (
                   withDisplayName(locale, customCategories).map((category) => (
-                    <div key={category.id} className="category-manage-row">
-                      <div className="category-manage-copy">
-                        <span className="category-manage-emoji">{category.emoji}</span>
-                        <strong>{category.displayName}</strong>
-                      </div>
-                      <button className="danger-btn" onClick={() => handleDeleteCategoryFromSettings(category.id)}>
+                    <div key={category.id} className={`expense-swipe ${swipedManageId === `category_${category.id}` ? 'open' : ''}`}>
+                      <button className="expense-delete-action" onClick={() => handleDeleteCategoryFromSettings(category.id)}>
                         {t(locale, 'delete')}
                       </button>
+                      <div
+                        className="category-manage-row editable-row expense-main manage-main"
+                        onTouchStart={(event) => handleManageTouchStart(`category_${category.id}`, event.changedTouches[0].clientX)}
+                        onTouchEnd={(event) => handleManageTouchEnd(`category_${category.id}`, event.changedTouches[0].clientX)}
+                        onClick={() => {
+                          if (swipedManageId === `category_${category.id}`) {
+                            setSwipedManageId(null);
+                            return;
+                          }
+                        }}
+                      >
+                        {editingCategoryId === category.id ? (
+                          <>
+                            <div className="category-manage-copy">
+                              <span className="category-manage-emoji">{category.emoji}</span>
+                              <input
+                                value={editingCategoryName}
+                                onChange={(event) => setEditingCategoryName(event.target.value)}
+                                onClick={(event) => event.stopPropagation()}
+                                onBlur={() => handleRenameCategory(category.id)}
+                                onKeyDown={(event) =>
+                                  handleManageInputKeyDown(
+                                    event,
+                                    () => handleRenameCategory(category.id),
+                                    () => {
+                                      setEditingCategoryId(null);
+                                      setEditingCategoryName('');
+                                    }
+                                  )
+                                }
+                                autoFocus
+                              />
+                            </div>
+                            <button
+                              className="mini-icon-btn"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleRenameCategory(category.id);
+                              }}
+                            >
+                              ✓
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <div className="category-manage-copy">
+                              <span className="category-manage-emoji">{category.emoji}</span>
+                              <strong>{category.displayName}</strong>
+                            </div>
+                            <button
+                              className="mini-icon-btn"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setEditingCategoryId(category.id);
+                                setEditingCategoryName(category.name);
+                              }}
+                            >
+                              ✎
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}
@@ -679,9 +994,46 @@ export default function App() {
                 <span>{t(locale, 'to')}</span>
                 <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
               </label>
+              <label>
+                <span>{t(locale, 'project')}</span>
+                <select
+                  value={projectFilter || ALL_PROJECTS_VALUE}
+                  onChange={(event) => setProjectFilter(event.target.value === ALL_PROJECTS_VALUE ? '' : event.target.value)}
+                >
+                  <option value={ALL_PROJECTS_VALUE}>{t(locale, 'allProjects')}</option>
+                  <option value={WITHOUT_PROJECT_VALUE}>{t(locale, 'withoutProject')}</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.name}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+              </label>
+              <label>
+                <span>{t(locale, 'category')}</span>
+                <select
+                  value={categoryFilter || ALL_CATEGORIES_VALUE}
+                  onChange={(event) => setCategoryFilter(event.target.value === ALL_CATEGORIES_VALUE ? '' : event.target.value)}
+                >
+                  <option value={ALL_CATEGORIES_VALUE}>{t(locale, 'allCategories')}</option>
+                  {displayCategories.map((category) => (
+                    <option key={category.id} value={category.name}>
+                      {category.emoji} {category.displayName}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             <div className="modal-actions">
-              <button className="ghost-btn" onClick={() => { setFromDate(''); setToDate(''); }}>
+              <button
+                className="ghost-btn"
+                onClick={() => {
+                  setFromDate('');
+                  setToDate('');
+                  setCategoryFilter('');
+                  setProjectFilter('');
+                }}
+              >
                 {t(locale, 'clear')}
               </button>
               <button className="primary-btn" onClick={() => setFilterModalOpen(false)}>
@@ -698,17 +1050,30 @@ export default function App() {
             <h3>{editingExpense ? t(locale, 'editExpense') : t(locale, 'addExpense')}</h3>
 
             <label>
+              <span>{t(locale, 'project')}</span>
+              <select
+                value={draft.project || NO_PROJECT_VALUE}
+                onChange={(event) => setDraft((prev) => ({ ...prev, project: event.target.value === NO_PROJECT_VALUE ? '' : event.target.value }))}
+              >
+                <option value={NO_PROJECT_VALUE}>{t(locale, 'noProject')}</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.name}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
               <span>{t(locale, 'category')}</span>
               <select
-                value={isAddingCustomCategory ? NEW_CATEGORY_VALUE : draft.category}
+                value={draft.category}
                 onChange={(event) => {
                   if (event.target.value === NEW_CATEGORY_VALUE) {
-                    setIsAddingCustomCategory(true);
-                    setDraft((prev) => ({ ...prev, emoji: customCategoryEmoji || '🏷️' }));
+                    openCategoryModal(true);
                     return;
                   }
                   const category = allCategories.find((item) => item.name === event.target.value);
-                  setIsAddingCustomCategory(false);
                   setDraft((prev) => ({
                     ...prev,
                     category: event.target.value,
@@ -724,27 +1089,6 @@ export default function App() {
                 <option value={NEW_CATEGORY_VALUE}>{t(locale, 'newCategoryOption')}</option>
               </select>
             </label>
-
-            {isAddingCustomCategory && (
-              <div className="grid-two">
-                <label>
-                  <span>{t(locale, 'emoji')}</span>
-                  <input
-                    className="emoji-input"
-                    value={customCategoryEmoji}
-                    onChange={(event) => setCustomCategoryEmoji(event.target.value)}
-                    onFocus={() => setCustomCategoryEmoji('')}
-                    placeholder="😀"
-                    maxLength={2}
-                    inputMode="text"
-                  />
-                </label>
-                <label>
-                  <span>{t(locale, 'categoryName')}</span>
-                  <input value={customCategoryName} onChange={(event) => setCustomCategoryName(event.target.value)} />
-                </label>
-              </div>
-            )}
 
             <div className="grid-two">
               <label>
@@ -767,7 +1111,7 @@ export default function App() {
               />
             </label>
 
-            {selectedCategory?.isDefault !== true && !isAddingCustomCategory && (
+            {allCategories.find((category) => category.name === draft.category)?.isDefault !== true && (
               <button
                 type="button"
                 className="danger-btn inline"
@@ -787,6 +1131,70 @@ export default function App() {
               </button>
               <button type="submit" className="primary-btn">
                 {editingExpense ? t(locale, 'update') : t(locale, 'add')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {projectModalOpen && (
+        <div className="modal-backdrop" onClick={() => setProjectModalOpen(false)}>
+          <form className="modal-card expense-form" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); handleAddProject(); }}>
+            <h3>{t(locale, 'addProject')}</h3>
+            <label>
+              <span>{t(locale, 'projectName')}</span>
+              <input
+                value={newProjectName}
+                onChange={(event) => setNewProjectName(event.target.value)}
+                onKeyDown={(event) => handleManageInputKeyDown(event, handleAddProject)}
+                autoFocus
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn" onClick={() => setProjectModalOpen(false)}>
+                {t(locale, 'cancel')}
+              </button>
+              <button type="submit" className="primary-btn">
+                {t(locale, 'add')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {categoryModalOpen && (
+        <div className="modal-backdrop" onClick={() => { setCategoryModalOpen(false); setCategoryModalForExpense(false); }}>
+          <form className="modal-card expense-form" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); handleAddCategory(); }}>
+            <h3>{t(locale, 'addCategory')}</h3>
+            <div className="grid-two">
+              <label>
+                <span>{t(locale, 'emoji')}</span>
+                <input
+                  className="emoji-input"
+                  value={newCategoryEmoji}
+                  onChange={(event) => setNewCategoryEmoji(event.target.value)}
+                  onFocus={() => setNewCategoryEmoji('')}
+                  placeholder="😀"
+                  maxLength={2}
+                  inputMode="text"
+                />
+              </label>
+              <label>
+                <span>{t(locale, 'categoryName')}</span>
+                <input
+                  value={newCategoryName}
+                  onChange={(event) => setNewCategoryName(event.target.value)}
+                  onKeyDown={(event) => handleManageInputKeyDown(event, handleAddCategory)}
+                  autoFocus
+                />
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="ghost-btn" onClick={() => { setCategoryModalOpen(false); setCategoryModalForExpense(false); }}>
+                {t(locale, 'cancel')}
+              </button>
+              <button type="submit" className="primary-btn">
+                {t(locale, 'add')}
               </button>
             </div>
           </form>

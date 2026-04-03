@@ -1,8 +1,9 @@
-import type { Category, Expense, Locale, Range } from '../types';
+import type { Category, Expense, Locale, Project, Range } from '../types';
 
 const KEYS = {
   expenses: 'expense_tracker_web_expenses',
   categories: 'expense_tracker_web_categories',
+  projects: 'expense_tracker_web_projects',
   income: 'expense_tracker_web_income',
   locale: 'expense_tracker_web_locale',
   range: 'expense_tracker_web_range',
@@ -42,6 +43,14 @@ export function saveCategories(categories: Category[]) {
   saveJson(KEYS.categories, categories);
 }
 
+export function loadProjects() {
+  return loadJson<Project[]>(KEYS.projects, []);
+}
+
+export function saveProjects(projects: Project[]) {
+  saveJson(KEYS.projects, projects);
+}
+
 export function loadIncome() {
   return loadJson<number>(KEYS.income, 0);
 }
@@ -67,10 +76,15 @@ export function saveRange(range: Range) {
 }
 
 export function loadFilter() {
-  return loadJson<{ fromIso: string | null; toIso: string | null }>(KEYS.filter, { fromIso: null, toIso: null });
+  return loadJson<{ fromIso: string | null; toIso: string | null; category: string | null; project: string | null }>(KEYS.filter, {
+    fromIso: null,
+    toIso: null,
+    category: null,
+    project: null,
+  });
 }
 
-export function saveFilter(filter: { fromIso: string | null; toIso: string | null }) {
+export function saveFilter(filter: { fromIso: string | null; toIso: string | null; category: string | null; project: string | null }) {
   saveJson(KEYS.filter, filter);
 }
 
