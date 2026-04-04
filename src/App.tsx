@@ -195,19 +195,23 @@ export default function App() {
 
     let active = true;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-      setAuthLoading(false);
+    // 1. Έλεγχος αν υπάρχει ήδη session (π.χ. από cookies)
+    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
+      if (active && initialSession) {
+        setSession(initialSession);
+        setUser(initialSession.user);
+      }
     });
 
+    // 2. Παρακολούθηση αλλαγών (συμπεριλαμβανομένου του redirect από Google)
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
-      setAuthLoading(false);
+      if (active) {
+        setSession(nextSession);
+        setUser(nextSession?.user ?? null);
+        setAuthLoading(false); // Σταματάμε το loading μόνο όταν το Supabase μας δώσει οριστική απάντηση
+      }
     });
 
     return () => {
