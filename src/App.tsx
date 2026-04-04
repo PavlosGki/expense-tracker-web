@@ -195,30 +195,16 @@ export default function App() {
 
     let active = true;
 
-    console.log('[AUTH DEBUG] Starting Auth Initialization. Hash present:', !!window.location.hash);
-    if (window.location.hash) {
-      console.log('[AUTH DEBUG] Full Hash Content:', window.location.hash.substring(0, 50) + '...');
-    }
-
-    // 1. Ρητή ανάκτηση του session.
-    supabase.auth.getSession().then(({ data: { session: currentSession }, error }) => {
-      if (!active) return;
-      if (error) console.error('[AUTH DEBUG] getSession Error:', error);
-      
-      console.log('[AUTH DEBUG] getSession completed. Session user:', currentSession?.user?.email ?? 'None');
-      setSession(currentSession);
-      setUser(currentSession?.user ?? null);
-      setAuthLoading(false);
-    });
-
-    // 2. Παρακολούθηση αλλαγών
+    // Αρχικοποίηση Auth και παρακολούθηση αλλαγών (Login/Logout/Redirect)
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, nextSession) => {
-      console.log('[AUTH DEBUG] onAuthStateChange Fired:', event, 'User:', nextSession?.user?.email ?? 'None');
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (active) {
         setSession(nextSession);
         setUser(nextSession?.user ?? null);
+        
+        // Η onAuthStateChange πυροδοτείται και στο INITIAL_SESSION,
+        // οπότε καλύπτει τόσο το φόρτωμα όσο και την επιστροφή από Google.
         setAuthLoading(false);
       }
     });
@@ -242,7 +228,7 @@ export default function App() {
         setBackground(profile.background as StoredBackground);
       } else {
         // Πρώτη φορά: Ανεβάζουμε τις τοπικές ρυθμίσεις στη βάση
-        await supabase.from('profiles').upsert({ 
+        await supabase.from('profiles').insert({ 
           id: user.id, 
           income, 
           locale, 
@@ -254,7 +240,7 @@ export default function App() {
       // 2. Φόρτωση Εξόδων & Migration
       const { data: remoteExpenses } = await supabase.from('expenses').select('*').order('date', { ascending: false });
       if (remoteExpenses && remoteExpenses.length > 0) {
-        setExpenses(remoteExpenses as Expense[]);
+        setExpenses(remoteExpenses.map(({ user_id: _, ...e }) => e as Expense));
       } else if (expenses.length > 0) {
         // Migration: Αν η βάση είναι άδεια, ανέβασε τα τοπικά έξοδα
         const toUpload = expenses.map(e => ({ ...e, user_id: user.id }));
@@ -264,7 +250,7 @@ export default function App() {
       // 3. Φόρτωση Κατηγοριών
       const { data: remoteCats } = await supabase.from('categories').select('*');
       if (remoteCats && remoteCats.length > 0) {
-        setCustomCategories(remoteCats as Category[]);
+        setCustomCategories(remoteCats.map(({ user_id: _, ...c }) => c as Category));
       } else if (customCategories.length > 0) {
         const toUpload = customCategories.map(c => ({ ...c, user_id: user.id }));
         await supabase.from('categories').insert(toUpload);
@@ -273,7 +259,7 @@ export default function App() {
       // 4. Φόρτωση Projects
       const { data: remoteProjects } = await supabase.from('projects').select('*');
       if (remoteProjects && remoteProjects.length > 0) {
-        setProjects(remoteProjects as Project[]);
+        setProjects(remoteProjects.map(({ user_id: _, ...p }) => p as Project));
       } else if (projects.length > 0) {
         const toUpload = projects.map(p => ({ ...p, user_id: user.id }));
         await supabase.from('projects').insert(toUpload);
@@ -299,8 +285,6 @@ export default function App() {
         locale, 
         background,
         updated_at: new Date().toISOString()
-      }).then(({ error }) => {
-        if (error) console.error('Error updating profile:', error);
       });
     }
   }, [income, locale, background, user]);
