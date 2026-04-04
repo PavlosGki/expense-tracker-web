@@ -195,26 +195,30 @@ export default function App() {
 
     let active = true;
 
-    // 1. Ρητή ανάκτηση του session (αυτό επεξεργάζεται το access_token από το URL)
-    const initAuth = async () => {
-      const { data: { session: initialSession } } = await supabase.auth.getSession();
-      if (active) {
-        setSession(initialSession);
-        setUser(initialSession?.user ?? null);
-        setAuthLoading(false);
-      }
-    };
-
-    initAuth();
-
-    // 2. Παρακολούθηση μελλοντικών αλλαγών
+    // Χρησιμοποιούμε το onAuthStateChange για να χειριστούμε την αρχική κατάσταση
+    // και το redirect από το Google Login.
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (active) {
         setSession(nextSession);
         setUser(nextSession?.user ?? null);
-        setAuthLoading(false);
+
+        const hasAccessToken = window.location.hash.includes('access_token=');
+
+        // Στρατηγική Loading:
+        // 1. Αν έχουμε SIGNED_IN ή SIGNED_OUT, η κατάσταση είναι οριστική.
+        // 2. Αν έχουμε INITIAL_SESSION, σταματάμε το loading ΜΟΝΟ αν δεν περιμένουμε 
+        //    token από το URL (hash). Αν υπάρχει hash, περιμένουμε το SIGNED_IN.
+        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+          setAuthLoading(false);
+        } else if (event === 'INITIAL_SESSION') {
+          if (!nextSession && hasAccessToken) {
+            // Συνεχίζουμε το loading, το SIGNED_IN event θα έρθει σε λίγα ms
+          } else {
+            setAuthLoading(false);
+          }
+        }
       }
     });
 
