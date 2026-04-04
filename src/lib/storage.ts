@@ -8,7 +8,8 @@ const KEYS = {
   locale: 'expense_tracker_web_locale',
   range: 'expense_tracker_web_range',
   filter: 'expense_tracker_web_filter',
-  background: 'expense_tracker_web_background'
+  background: 'expense_tracker_web_background',
+  lastProject: 'expense_tracker_web_last_project',
 };
 
 export function loadJson<T>(key: string, fallback: T): T {
@@ -24,7 +25,11 @@ export function loadJson<T>(key: string, fallback: T): T {
 
 export function saveJson<T>(key: string, value: T) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(key, JSON.stringify(value));
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`Failed to save to localStorage for key "${key}":`, error);
+  }
 }
 
 export function loadExpenses() {
@@ -96,4 +101,12 @@ export function loadBackground() {
 
 export function saveBackground(background: StoredBackground) {
   saveJson(KEYS.background, background);
+}
+
+export function loadLastProject() {
+  return loadJson<string | null>(KEYS.lastProject, null);
+}
+
+export function saveLastProject(project: string | null) {
+  saveJson(KEYS.lastProject, project);
 }

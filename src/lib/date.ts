@@ -1,4 +1,4 @@
-import type { Expense, Range, HistoryGroup, AnalyticsGroup, Locale } from '../types';
+import type { AnalyticsGroup, Expense, HistoryGroup, Locale, Range } from '../types';
 import { getLocalizedMonthAcc } from './i18n';
 
 export const TRACKING_START_ISO = '2026-01-01';
@@ -23,7 +23,7 @@ export function addDaysUtc(date: Date, days: number) {
 
 export function formatIsoDate(isoDate: string) {
   const [year, month, day] = isoDate.split('-');
-  return `${day}/${month}/${year}`;
+  return `${day}-${month}-${year}`;
 }
 
 function getIsoWeekStartUtc(isoDate: string) {
@@ -43,13 +43,12 @@ export function clampFilterRange(fromDate: Date | null, toDate: Date | null) {
   let startIso = TRACKING_START_ISO;
   let endIso = todayIso;
 
-  if (fromDate && toDate) {
-    const fromIso = toLocalIsoDate(fromDate);
-    const toIso = toLocalIsoDate(toDate);
-    startIso = fromIso <= toIso ? fromIso : toIso;
-    endIso = fromIso <= toIso ? toIso : fromIso;
-    if (startIso < TRACKING_START_ISO) startIso = TRACKING_START_ISO;
-    if (endIso > todayIso) endIso = todayIso;
+  if (fromDate) startIso = toLocalIsoDate(fromDate);
+  if (toDate) endIso = toLocalIsoDate(toDate);
+
+  // Διασφάλιση σωστής σειράς αν οι ημερομηνίες είναι ανάποδα
+  if (startIso > endIso) {
+    [startIso, endIso] = [endIso, startIso];
   }
 
   return { startIso, endIso };
@@ -57,8 +56,13 @@ export function clampFilterRange(fromDate: Date | null, toDate: Date | null) {
 
 export function filterExpensesByDateRange(expenses: Expense[], fromDate: Date | null, toDate: Date | null) {
   const { startIso, endIso } = clampFilterRange(fromDate, toDate);
+  
+  // Αν δεν υπάρχει φίλτρο "έως", επιτρέπουμε όλα τα μελλοντικά έξοδα 
+  // ορίζοντας μια πολύ μεγάλη ημερομηνία για το φιλτράρισμα
+  const finalEndIso = toDate ? endIso : '2099-12-31';
+
   const startUtc = new Date(`${startIso}T00:00:00Z`);
-  const endExclusiveUtc = addDaysUtc(new Date(`${endIso}T00:00:00Z`), 1);
+  const endExclusiveUtc = addDaysUtc(new Date(`${finalEndIso}T00:00:00Z`), 1);
 
   return expenses.filter((expense) => {
     if (!expense.date) return false;
@@ -99,10 +103,11 @@ export function getHistoryGroups(expenses: Expense[], range: Range, fromDate: Da
   const currentMonthKey = todayIso.slice(0, 7);
   const currentYearKey = todayIso.slice(0, 4);
   const trackingStartUtc = new Date(`${TRACKING_START_ISO}T00:00:00Z`);
-  const todayEndExclusiveUtc = addDaysUtc(todayUtc, 1);
+  
   const { startIso, endIso } = clampFilterRange(fromDate, toDate);
-  const scopeStartUtc = fromDate && toDate ? new Date(`${startIso}T00:00:00Z`) : trackingStartUtc;
-  const scopeEndExclusiveUtc = fromDate && toDate ? addDaysUtc(new Date(`${endIso}T00:00:00Z`), 1) : todayEndExclusiveUtc;
+  // Χρησιμοποιούμε τις ημερομηνίες από το clampFilterRange για το εύρος της λίστας
+  const scopeStartUtc = new Date(`${startIso}T00:00:00Z`);
+  const scopeEndExclusiveUtc = addDaysUtc(new Date(`${endIso}T00:00:00Z`), 1);
 
   const byDay: Record<string, Expense[]> = {};
   const byMonth: Record<string, Expense[]> = {};

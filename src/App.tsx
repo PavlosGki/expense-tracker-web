@@ -3,6 +3,7 @@ import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useS
 import { buildCsv, downloadCsv, parseCsvRows } from './lib/csv';
 import {
   filterExpensesByDateRange,
+  formatIsoDate,
   getAnalyticsGroups,
   getExpensePeriodTotals,
   getHistoryGroups,
@@ -16,6 +17,7 @@ import {
   loadExpenses,
   loadFilter,
   loadIncome,
+  loadLastProject,
   loadLocale,
   loadProjects,
   loadRange,
@@ -24,10 +26,11 @@ import {
   saveExpenses,
   saveFilter,
   saveIncome,
+  saveLastProject,
   saveLocale,
   saveProjects,
   saveRange,
-  type StoredBackground,
+  type StoredBackground
 } from './lib/storage';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import './styles.css';
@@ -125,8 +128,8 @@ function normalizeAmount(value: string) {
 }
 
 /** Πρόταση: Διαχωρισμός του Header σε αυτόνομο Component **/
-function Header({ locale, tab, setTab, user, onSignOut }: { 
-  locale: Locale, tab: TabId, setTab: (t: TabId) => void, user: User, onSignOut: () => void 
+function Header({ locale, tab, setTab, user, onSignOut, onOpenFilter, hasActiveFilter }: { 
+  locale: Locale, tab: TabId, setTab: (t: TabId) => void, user: User, onSignOut: () => void, onOpenFilter: () => void, hasActiveFilter: boolean 
 }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -150,13 +153,21 @@ function Header({ locale, tab, setTab, user, onSignOut }: {
         <h1>{t(locale, 'appTitle')}</h1>
       </div>
       <nav className="tabbar">
+        <button 
+          className={`tab-chip ${hasActiveFilter ? 'active' : ''}`} 
+          onClick={onOpenFilter}
+          title="Φίλτρα"
+          style={{ padding: '6px 12px', display: 'flex', alignItems: 'center' }}
+        >
+          <span style={{ fontSize: '15px' }}>🔍</span>
+        </button>
         {(['home', 'analytics', 'settings'] as const).map((id) => (
           <button key={id} className={`tab-chip ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
             {t(locale, id)}
           </button>
         ))}
         
-        <div className="profile-menu-container" ref={dropdownRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <div className="profile-menu-container" ref={dropdownRef} style={{ position: 'relative', display: 'flex', alignItems: 'center', marginLeft: 'auto' }}>
           <button 
             className="avatar-trigger"
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -226,19 +237,19 @@ function Header({ locale, tab, setTab, user, onSignOut }: {
 }
 
 export default function App() {
-  const [locale, setLocale] = useState<Locale>('el');
+  const [locale, setLocale] = useState<Locale>(() => loadLocale());
   const [tab, setTab] = useState<TabId>('home');
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [customCategories, setCustomCategories] = useState<Category[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [income, setIncome] = useState(0);
-  const [budgetInputValue, setBudgetInputValue] = useState('0');
-  const [range, setRange] = useState<Range>('month');
-  const [background, setBackground] = useState<StoredBackground>({ type: 'preset', value: 'default' });
-  const [fromDate, setFromDate] = useState<string>('');
-  const [toDate, setToDate] = useState<string>('');
-  const [categoryFilter, setCategoryFilter] = useState<string>('');
-  const [projectFilter, setProjectFilter] = useState<string>('');
+  const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
+  const [customCategories, setCustomCategories] = useState<Category[]>(() => loadCategories());
+  const [projects, setProjects] = useState<Project[]>(() => loadProjects());
+  const [income, setIncome] = useState(() => loadIncome());
+  const [budgetInputValue, setBudgetInputValue] = useState(() => String(loadIncome()));
+  const [range, setRange] = useState<Range>(() => loadRange());
+  const [background, setBackground] = useState<StoredBackground>(() => loadBackground());
+  const [fromDate, setFromDate] = useState<string>(() => loadFilter().fromIso ?? '');
+  const [toDate, setToDate] = useState<string>(() => loadFilter().toIso ?? '');
+  const [categoryFilter, setCategoryFilter] = useState<string>(() => loadFilter().category ?? '');
+  const [projectFilter, setProjectFilter] = useState<string>(() => loadFilter().project ?? '');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [expenseModalOpen, setExpenseModalOpen] = useState(false);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
@@ -252,7 +263,6 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [swipedExpenseId, setSwipedExpenseId] = useState<string | null>(null);
-  const [swipedManageId, setSwipedManageId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ExpenseDraft>({
     project: '',
     amount: '',
@@ -270,24 +280,6 @@ export default function App() {
   const [editingProjectName, setEditingProjectName] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
-  const manageSwipeStartRef = useRef<{ id: string; x: number } | null>(null);
-
-  useEffect(() => {
-    setLocale(loadLocale());
-    setExpenses(loadExpenses());
-    setCustomCategories(loadCategories());
-    setProjects(loadProjects());
-    const savedIncome = loadIncome();
-    setIncome(savedIncome);
-    setBudgetInputValue(String(savedIncome));
-    setRange(loadRange());
-    setBackground(loadBackground());
-    const filter = loadFilter();
-    setFromDate(filter.fromIso ?? '');
-    setToDate(filter.toIso ?? '');
-    setCategoryFilter(filter.category ?? '');
-    setProjectFilter(filter.project ?? '');
-  }, []);
 
   useEffect(() => {
     if (!supabase) {
@@ -298,18 +290,31 @@ export default function App() {
     let active = true;
 
     // Αρχικοποίηση Auth και παρακολούθηση αλλαγών (Login/Logout/Redirect)
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (active) {
-        setSession(nextSession);
-        setUser(nextSession?.user ?? null);
-        
-        // Η onAuthStateChange πυροδοτείται και στο INITIAL_SESSION,
-        // οπότε καλύπτει τόσο το φόρτωμα όσο και την επιστροφή από Google.
-        setAuthLoading(false);
-      }
-    });
+    // Ζητάμε το τρέχον session ρητά για να μην κολλήσει το loading
+      supabase.auth.getSession()
+        .then(({ data: { session } }) => {
+          if (active) {
+            setSession(session);
+            setUser(session?.user ?? null);
+          }
+        })
+        .catch((error) => {
+          console.error("Supabase Auth Error:", error);
+        })
+        .finally(() => {
+          if (active) setAuthLoading(false);
+        });
+
+      // Παρακολούθηση αλλαγών (Login/Logout/Redirect)
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+        if (active) {
+          setSession(nextSession);
+          setUser(nextSession?.user ?? null);
+        }
+      });
+
 
     return () => {
       active = false;
@@ -321,16 +326,31 @@ export default function App() {
   useEffect(() => {
     async function syncCloudData() {
       if (!user || !supabase) return;
-      setIsInitialSyncDone(false);
+      
+      const isFirstLoad = !isInitialSyncDone;
+      if (isFirstLoad) setIsInitialSyncDone(false);
 
       // 1. Φόρτωση Προφίλ (Income, Locale, κλπ)
-      const { data: profile } = await supabase.from('profiles').select('*').single();
+      const { data: profile } = await supabase.from('profiles').select('*').maybeSingle();
+      
       if (profile) {
-        setIncome(Number(profile.income));
+        const cloudIncome = Number(profile.income);
+        
+        // Robust Sync: Αν το cloud έχει 0 αλλά το τοπικό state έχει ήδη τιμή (από localStorage),
+        // τότε προτιμούμε την τοπική τιμή και ενημερώνουμε το cloud.
+        if (cloudIncome === 0 && income > 0) {
+          await supabase.from('profiles').update({ 
+            income, 
+            updated_at: new Date().toISOString() 
+          }).eq('id', user.id);
+        } else {
+          setIncome(cloudIncome);
+        }
+        
         setLocale(profile.locale as Locale);
         setBackground(profile.background as StoredBackground);
       } else {
-        // Πρώτη φορά: Ανεβάζουμε τις τοπικές ρυθμίσεις στη βάση
+        // Αν δεν υπάρχει καθόλου προφίλ, δημιουργούμε ένα με τις τρέχουσες τοπικές τιμές
         await supabase.from('profiles').insert({ 
           id: user.id, 
           income, 
@@ -375,12 +395,12 @@ export default function App() {
     if (user) syncCloudData();
   }, [user]);
 
-  // Local updates (μόνο αν δεν υπάρχει χρήστης, αλλιώς πάμε μέσω Cloud)
-  useEffect(() => { if (!user) saveLocale(locale); }, [locale, user]);
-  useEffect(() => { if (!user) saveExpenses(expenses); }, [expenses, user]);
-  useEffect(() => { if (!user) saveCategories(customCategories); }, [customCategories, user]);
-  useEffect(() => { if (!user) saveProjects(projects); }, [projects, user]);
-  useEffect(() => { if (!user) saveIncome(income); }, [income, user]);
+  // Το Local Storage πρέπει να ενημερώνεται ΠΑΝΤΑ, λειτουργώντας ως cache.
+  useEffect(() => saveLocale(locale), [locale]);
+  useEffect(() => saveExpenses(expenses), [expenses]);
+  useEffect(() => saveCategories(customCategories), [customCategories]);
+  useEffect(() => saveProjects(projects), [projects]);
+  useEffect(() => saveIncome(income), [income]);
 
   // Συγχρονισμός Income & Background όταν αλλάζουν
   useEffect(() => {
@@ -412,7 +432,7 @@ export default function App() {
   }, [background]);
 
   const allCategories = useMemo(() => [...DEFAULT_CATEGORIES, ...customCategories], [customCategories]);
-  const displayCategories = useMemo(() => withDisplayName(locale, allCategories), [locale, allCategories]);
+  const displayCategories = useMemo(() => withDisplayName(locale, allCategories), [locale, allCategories]); // Ensure this is defined
   const filterFromDate = fromDate ? parseIsoDateToLocal(fromDate) : null;
   const filterToDate = toDate ? parseIsoDateToLocal(toDate) : null;
   const categoryFilterLabel =
@@ -430,24 +450,50 @@ export default function App() {
     [expenses, categoryFilter, projectFilter]
   );
   const filteredExpenses = useMemo(
-    () => filterExpensesByDateRange(metaFilteredExpenses, filterFromDate, filterToDate),
+    () => {
+      // Αν δεν υπάρχει ενεργό φίλτρο ημερομηνίας, θέλουμε να βλέπουμε τα πάντα 
+      // στα σύνολα (day/week/month/year), συμπεριλαμβανομένων των μελλοντικών.
+      if (!filterFromDate && !filterToDate) return metaFilteredExpenses;
+      return filterExpensesByDateRange(metaFilteredExpenses, filterFromDate, filterToDate);
+    },
     [metaFilteredExpenses, filterFromDate, filterToDate]
   );
+
+  // Υπολογισμός των ορίων ημερομηνίας για τις λίστες (Ιστορικό/Ανάλυση)
+  // Αν δεν υπάρχει φίλτρο, χρησιμοποιούμε την παλαιότερη και τη νεότερη ημερομηνία από τα δεδομένα
+  const listBounds = useMemo(() => {
+    const hasExpenses = metaFilteredExpenses.length > 0;
+    const today = new Date();
+    // Εξασφαλίζουμε ότι το 'to' όριο είναι τουλάχιστον η σημερινή ημερομηνία
+    // ή η ημερομηνία του πιο μελλοντικού εξόδου, αν δεν υπάρχει φίλτρο.
+    const maxDateFromExpenses = hasExpenses ? parseIsoDateToLocal(metaFilteredExpenses[0].date) : today;
+
+    return {
+      from: filterFromDate || (hasExpenses ? parseIsoDateToLocal(metaFilteredExpenses[metaFilteredExpenses.length - 1].date) : null),
+      to: filterToDate || maxDateFromExpenses
+    };
+  }, [metaFilteredExpenses, filterFromDate, filterToDate]);
+
   const totals = useMemo(() => getExpensePeriodTotals(filteredExpenses), [filteredExpenses]);
   const historyGroups = useMemo(
-    () => getHistoryGroups(metaFilteredExpenses, range, filterFromDate, filterToDate, locale),
-    [metaFilteredExpenses, range, filterFromDate, filterToDate, locale]
+    () => getHistoryGroups(metaFilteredExpenses, range, listBounds.from, listBounds.to, locale).filter(g => g.items.length > 0),
+    [metaFilteredExpenses, range, listBounds, locale]
   );
   const analyticsGroups = useMemo(
-    () => getAnalyticsGroups(metaFilteredExpenses, range, filterFromDate, filterToDate, locale),
-    [metaFilteredExpenses, range, filterFromDate, filterToDate, locale]
+    () => getAnalyticsGroups(metaFilteredExpenses, range, listBounds.from, listBounds.to, locale).filter(g => g.items.length > 0),
+    [metaFilteredExpenses, range, listBounds, locale]
   );
   const hasActiveFilter = Boolean(fromDate || toDate || categoryFilter || projectFilter);
 
   const openAddExpense = () => {
     setEditingExpense(null);
+
+    const lastProject = loadLastProject(); // Load from localStorage
+    // Επιβεβαιώνουμε ότι το project υπάρχει ακόμα στη λίστα σου πριν το προεπιλέξουμε
+    const defaultProject = projects.some(p => p.name === lastProject) ? (lastProject || '') : ''; // Check if project exists
+
     setDraft({
-      project: '',
+      project: defaultProject,
       amount: '',
       category: DEFAULT_CATEGORIES[0].name,
       emoji: DEFAULT_CATEGORIES[0].emoji,
@@ -514,6 +560,7 @@ export default function App() {
       if (error) console.error('Error saving to cloud:', error);
     }
 
+    saveLastProject(nextExpense.project || null); // Αποθήκευση του τελευταίου project
     setExpenses((prev) => {
       const base = editingExpense ? prev.map((item) => (item.id === editingExpense.id ? nextExpense : item)) : [nextExpense, ...prev];
       return base.sort((a, b) => b.date.localeCompare(a.date));
@@ -545,22 +592,6 @@ export default function App() {
       const { error } = await supabase.from('expenses').delete().eq('id', id);
       if (error) console.error('Error deleting from cloud:', error);
     }
-  };
-
-  const handleManageTouchStart = (id: string, clientX: number) => {
-    manageSwipeStartRef.current = { id, x: clientX };
-  };
-
-  const handleManageTouchEnd = (id: string, clientX: number) => {
-    const swipe = manageSwipeStartRef.current;
-    if (!swipe || swipe.id !== id) return;
-    const deltaX = clientX - swipe.x;
-    if (deltaX <= -60) {
-      setSwipedManageId(id);
-    } else if (deltaX >= 30 || swipedManageId === id) {
-      setSwipedManageId(null);
-    }
-    manageSwipeStartRef.current = null;
   };
 
   const handleDeleteCategory = async (id: string) => {
@@ -846,13 +877,21 @@ export default function App() {
 
   return (
     <div className="page-shell">
-      <Header locale={locale} tab={tab} setTab={setTab} user={user} onSignOut={handleSignOut} />
-
+      <Header 
+        locale={locale} 
+        tab={tab} 
+        setTab={setTab} 
+        user={user} 
+        onSignOut={handleSignOut} 
+        onOpenFilter={() => setFilterModalOpen(true)}
+        hasActiveFilter={hasActiveFilter}
+      />
+      
       <main className="main-grid">
         {showDashboard && (
           <>
             <section className="panel budget-panel">
-              <h3 className="budget-title">Budget</h3>
+              <h3 className="budget-title">{t(locale, 'monthlyBudget')}</h3>
               <div className="budget-bar-wrap">
                 <strong className="budget-spent-value">{currentMonthSpend.toFixed(2)} €</strong>
                 <div className="progress-track budget-track">
@@ -877,19 +916,19 @@ export default function App() {
             </section>
 
             <section className="toolbar-row">
-              <div className="toolbar-title">
-                <h3>{tab === 'analytics' ? t(locale, 'byCategory') : t(locale, 'history')}</h3>
-                <button className={`icon-btn ${hasActiveFilter ? 'active' : ''}`} onClick={() => setFilterModalOpen(true)}>
-                  ☰
-                </button>
-              </div>
+              <h3>{tab === 'analytics' ? t(locale, 'byCategory') : t(locale, 'history')}</h3>
               {hasActiveFilter && (
                 <p className="filter-pill">
-                  {t(locale, 'filterActive')}: {fromDate || '—'} / {toDate || '—'} / {categoryFilterLabel || t(locale, 'allCategories')} /{' '}
+                  {t(locale, 'activeFilters')}:{' '}
+                  {fromDate ? formatIsoDate(fromDate) : '—'} /{' '}
+                  {toDate ? formatIsoDate(toDate) : '—'} /{' '}
+                  {categoryFilterLabel || t(locale, 'allCategories')} /{' '}
                   {projectFilterLabel}
                 </p>
               )}
             </section>
+
+            {/* Filter Modal is now controlled by the Header button */}
           </>
         )}
 
@@ -935,7 +974,7 @@ export default function App() {
                               <span className="expense-copy">
                                 <strong>{getLocalizedCategoryName(locale, expense.category)}</strong>
                                 <small>
-                                  {[expense.project, expense.date, expense.comment?.trim()].filter(Boolean).join(' • ')}
+                                  {[expense.project, expense.date ? formatIsoDate(expense.date) : '', expense.comment?.trim()].filter(Boolean).join(' • ')}
                                 </small>
                               </span>
                               <strong>{expense.amount} €</strong>
@@ -1015,12 +1054,12 @@ export default function App() {
             </section>
             <section className="panel">
               <div className="settings-header">
-                <div>
-                  <h3>{t(locale, 'setBudget')}</h3>
-                </div>
-                <strong className="settings-budget-value">{income.toFixed(0)} €</strong>
+                <h3>{t(locale, 'setBudget')}</h3>
+                <strong className="settings-budget-value">{income.toFixed(0)} €</strong> {/* Display current budget */}
               </div>
-              <div className="budget-settings-block">
+              {/* Budget slider and input */}
+              <div className="budget-settings-block"> 
+                {/* Slider */}
                 <input
                   className="budget-slider"
                   type="range"
@@ -1031,6 +1070,7 @@ export default function App() {
                   onChange={(event) => setIncome(Math.min(5000, Math.max(0, Number(event.target.value) || 0)))}
                 />
                 <label className="budget-input-wrap">
+                  {/* Manual Input */}
                   <input
                     type="number"
                     min="0"
@@ -1092,20 +1132,10 @@ export default function App() {
                   <p className="empty-line">{t(locale, 'noProjects')}</p>
                 ) : (
                   projects.map((project) => (
-                    <div key={project.id} className={`expense-swipe ${swipedManageId === `project_${project.id}` ? 'open' : ''}`}>
-                      <button className="expense-delete-action" onClick={() => handleDeleteProjectFromSettings(project.id)}>
-                        {t(locale, 'delete')}
-                      </button>
+                    <div key={project.id}>
                       <div
-                        className="category-manage-row editable-row expense-main manage-main"
-                        onTouchStart={(event) => handleManageTouchStart(`project_${project.id}`, event.changedTouches[0].clientX)}
-                        onTouchEnd={(event) => handleManageTouchEnd(`project_${project.id}`, event.changedTouches[0].clientX)}
-                        onClick={() => {
-                          if (swipedManageId === `project_${project.id}`) {
-                            setSwipedManageId(null);
-                            return;
-                          }
-                        }}
+                        className="category-manage-row editable-row manage-main"
+                        style={{ paddingRight: '8px' }}
                       >
                         {editingProjectId === project.id ? (
                           <>
@@ -1145,6 +1175,16 @@ export default function App() {
                             </div>
                             <button
                               className="mini-icon-btn"
+                              style={{ color: '#ff453a', marginRight: '10px' }}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDeleteProjectFromSettings(project.id);
+                              }}
+                            >
+                              🗑️
+                            </button>
+                            <button
+                              className="mini-icon-btn"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 setEditingProjectId(project.id);
@@ -1173,20 +1213,10 @@ export default function App() {
                   <p className="empty-line">{t(locale, 'noCustomCategories')}</p>
                 ) : (
                   withDisplayName(locale, customCategories).map((category) => (
-                    <div key={category.id} className={`expense-swipe ${swipedManageId === `category_${category.id}` ? 'open' : ''}`}>
-                      <button className="expense-delete-action" onClick={() => handleDeleteCategoryFromSettings(category.id)}>
-                        {t(locale, 'delete')}
-                      </button>
+                    <div key={category.id}>
                       <div
-                        className="category-manage-row editable-row expense-main manage-main"
-                        onTouchStart={(event) => handleManageTouchStart(`category_${category.id}`, event.changedTouches[0].clientX)}
-                        onTouchEnd={(event) => handleManageTouchEnd(`category_${category.id}`, event.changedTouches[0].clientX)}
-                        onClick={() => {
-                          if (swipedManageId === `category_${category.id}`) {
-                            setSwipedManageId(null);
-                            return;
-                          }
-                        }}
+                        className="category-manage-row editable-row manage-main"
+                        style={{ paddingRight: '8px' }}
                       >
                         {editingCategoryId === category.id ? (
                           <>
@@ -1228,6 +1258,16 @@ export default function App() {
                             </div>
                             <button
                               className="mini-icon-btn"
+                              style={{ color: '#ff453a', marginRight: '10px' }}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDeleteCategoryFromSettings(category.id);
+                              }}
+                            >
+                              🗑️
+                            </button>
+                            <button
+                              className="mini-icon-btn"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 setEditingCategoryId(category.id);
@@ -1261,6 +1301,7 @@ export default function App() {
         )}
       </main>
 
+      {/* Background Modal */}
       {backgroundModalOpen && (
         <div className="modal-backdrop" onClick={() => setBackgroundModalOpen(false)}>
           <div className="modal-card background-modal" onClick={(event) => event.stopPropagation()}>
@@ -1291,6 +1332,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Filter Modal */}
       {filterModalOpen && (
         <div className="modal-backdrop" onClick={() => setFilterModalOpen(false)}>
           <div className="modal-card filter-modal" onClick={(event) => event.stopPropagation()}>
@@ -1298,11 +1340,25 @@ export default function App() {
             <div className="filter-fields">
               <label>
                 <span>{t(locale, 'from')}</span>
-                <input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
+                <input 
+                  type={fromDate ? "date" : "text"} 
+                  placeholder="dd-mm-yyyy"
+                  onFocus={(e) => e.target.type = 'date'}
+                  onBlur={(e) => { if (!e.target.value) e.target.type = 'text'; }}
+                  value={fromDate} 
+                  onChange={(event) => setFromDate(event.target.value)} 
+                />
               </label>
               <label>
                 <span>{t(locale, 'to')}</span>
-                <input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+                <input 
+                  type={toDate ? "date" : "text"} 
+                  placeholder="dd-mm-yyyy"
+                  onFocus={(e) => e.target.type = 'date'}
+                  onBlur={(e) => { if (!e.target.value) e.target.type = 'text'; }}
+                  value={toDate} 
+                  onChange={(event) => setToDate(event.target.value)} 
+                />
               </label>
               <label>
                 <span>{t(locale, 'project')}</span>
@@ -1436,6 +1492,19 @@ export default function App() {
             )}
 
             <div className="modal-actions">
+              {editingExpense && (
+                <button
+                  type="button"
+                  className="danger-btn"
+                  style={{ marginRight: 'auto' }}
+                  onClick={() => {
+                    handleDeleteExpense(editingExpense.id);
+                    closeExpenseModal();
+                  }}
+                >
+                  {t(locale, 'delete')}
+                </button>
+              )}
               <button type="button" className="ghost-btn" onClick={closeExpenseModal}>
                 {t(locale, 'cancel')}
               </button>

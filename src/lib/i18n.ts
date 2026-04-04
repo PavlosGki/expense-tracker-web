@@ -1,4 +1,4 @@
-import type { Locale, Category } from '../types';
+import type { Category, Locale } from '../types';
 
 type Dict = Record<string, string>;
 
@@ -65,7 +65,7 @@ export const EL: Dict = {
   importCsv: 'Εισαγωγή CSV',
   exportCsvDesc: 'Κατέβασε τα έξοδα ως αρχείο CSV',
   importCsvDesc: 'Φόρτωσε έξοδα από αρχείο CSV',
-  setBudget: 'Ορισμός Budget',
+  setBudget: 'Ορισμός μηνιαίου budget',
   day: 'ΗΜΕΡΑ',
   week: 'ΕΒΔΟΜΑΔΑ',
   month: 'ΜΗΝΑΣ',
@@ -77,6 +77,7 @@ export const EL: Dict = {
   saveBudget: 'Αποθήκευση Budget',
   budgetAmount: 'Ποσό Budget',
   budgetShort: 'Budget',
+  monthlyBudget: 'ΜΗΝΙΑΙΟ BUDGET',
   spentThisMonth: 'Ξοδεμένα μήνα',
   edit: 'Edit',
   add: 'Προσθήκη',
@@ -193,7 +194,7 @@ export const EN: Dict = {
   importCsv: 'Import CSV',
   exportCsvDesc: 'Download your expenses as a CSV file',
   importCsvDesc: 'Load expenses from a CSV file',
-  setBudget: 'Set Budget',
+  setBudget: 'Set monthly budget',
   day: 'DAY',
   week: 'WEEK',
   month: 'MONTH',
@@ -205,6 +206,7 @@ export const EN: Dict = {
   saveBudget: 'Save Budget',
   budgetAmount: 'Budget Amount',
   budgetShort: 'Budget',
+  monthlyBudget: 'MONTHLY BUDGET',
   spentThisMonth: 'Spent this month',
   edit: 'Edit',
   add: 'Add',
