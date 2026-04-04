@@ -195,24 +195,26 @@ export default function App() {
 
     let active = true;
 
-    // Χρησιμοποιούμε το onAuthStateChange που πιάνει τόσο το αρχικό session 
-    // όσο και την επιστροφή (redirect) από το Google Login.
+    // 1. Ρητή ανάκτηση του session (αυτό επεξεργάζεται το access_token από το URL)
+    const initAuth = async () => {
+      const { data: { session: initialSession } } = await supabase.auth.getSession();
+      if (active) {
+        setSession(initialSession);
+        setUser(initialSession?.user ?? null);
+        setAuthLoading(false);
+      }
+    };
+
+    initAuth();
+
+    // 2. Παρακολούθηση μελλοντικών αλλαγών
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (active) {
         setSession(nextSession);
         setUser(nextSession?.user ?? null);
-        
-        // Το Supabase στέλνει το 'INITIAL_SESSION' ή 'SIGNED_IN' 
-        // όταν ολοκληρωθεί ο έλεγχος του session ή του URL hash.
-        if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
-          // Μικρή καθυστέρηση για να προλάβει το state να ενημερωθεί 
-          // και να αποφύγουμε το flicker του login screen.
-          setTimeout(() => {
-            if (active) setAuthLoading(false);
-          }, 100);
-        }
+        setAuthLoading(false);
       }
     });
 
