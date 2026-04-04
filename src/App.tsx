@@ -195,19 +195,27 @@ export default function App() {
 
     let active = true;
 
-    // 1. Ρητή ανάκτηση του session. 
-    // Αυτό είναι το κλειδί: το getSession επεξεργάζεται το #access_token από το URL.
-    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+    console.log('[AUTH DEBUG] Starting Auth Initialization. Hash present:', !!window.location.hash);
+    if (window.location.hash) {
+      console.log('[AUTH DEBUG] Full Hash Content:', window.location.hash.substring(0, 50) + '...');
+    }
+
+    // 1. Ρητή ανάκτηση του session.
+    supabase.auth.getSession().then(({ data: { session: currentSession }, error }) => {
       if (!active) return;
+      if (error) console.error('[AUTH DEBUG] getSession Error:', error);
+      
+      console.log('[AUTH DEBUG] getSession completed. Session user:', currentSession?.user?.email ?? 'None');
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
       setAuthLoading(false);
     });
 
-    // 2. Παρακολούθηση αλλαγών για το μέλλον (logout, expiry κλπ)
+    // 2. Παρακολούθηση αλλαγών
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      console.log('[AUTH DEBUG] onAuthStateChange Fired:', event, 'User:', nextSession?.user?.email ?? 'None');
       if (active) {
         setSession(nextSession);
         setUser(nextSession?.user ?? null);
