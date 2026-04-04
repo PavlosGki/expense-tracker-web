@@ -1,5 +1,5 @@
+import type { Session, User } from '@supabase/supabase-js';
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
-import './styles.css';
 import { buildCsv, downloadCsv, parseCsvRows } from './lib/csv';
 import {
   filterExpensesByDateRange,
@@ -29,6 +29,8 @@ import {
   saveRange,
   type StoredBackground,
 } from './lib/storage';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
+import './styles.css';
 import type { Category, Expense, Locale, Project, Range, TabId } from './types';
 
 const DEFAULT_CATEGORIES: Category[] = [
@@ -143,6 +145,9 @@ export default function App() {
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [categoryModalForExpense, setCategoryModalForExpense] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [swipedExpenseId, setSwipedExpenseId] = useState<string | null>(null);
   const [swipedManageId, setSwipedManageId] = useState<string | null>(null);
@@ -182,11 +187,111 @@ export default function App() {
     setProjectFilter(filter.project ?? '');
   }, []);
 
-  useEffect(() => saveLocale(locale), [locale]);
-  useEffect(() => saveExpenses(expenses), [expenses]);
-  useEffect(() => saveCategories(customCategories), [customCategories]);
-  useEffect(() => saveProjects(projects), [projects]);
-  useEffect(() => saveIncome(income), [income]);
+  useEffect(() => {
+    if (!supabase) {
+      setAuthLoading(false);
+      return;
+    }
+
+    let active = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setSession(data.session);
+      setUser(data.session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Cloud Sync Logic: Φόρτωση δεδομένων από το Supabase μετά το Login
+  useEffect(() => {
+    async function syncCloudData() {
+      if (!user || !supabase) return;
+
+      // 1. Φόρτωση Προφίλ (Income, Locale, κλπ)
+      const { data: profile } = await supabase.from('profiles').select('*').single();
+      if (profile) {
+        setIncome(Number(profile.income));
+        setLocale(profile.locale as Locale);
+        setBackground(profile.background as StoredBackground);
+      } else {
+        // Πρώτη φορά: Ανεβάζουμε τις τοπικές ρυθμίσεις στη βάση
+        await supabase.from('profiles').upsert({ 
+          id: user.id, 
+          income, 
+          locale, 
+          background,
+          updated_at: new Date().toISOString()
+        });
+      }
+
+      // 2. Φόρτωση Εξόδων & Migration
+      const { data: remoteExpenses } = await supabase.from('expenses').select('*').order('date', { ascending: false });
+      if (remoteExpenses && remoteExpenses.length > 0) {
+        setExpenses(remoteExpenses as Expense[]);
+      } else if (expenses.length > 0) {
+        // Migration: Αν η βάση είναι άδεια, ανέβασε τα τοπικά έξοδα
+        const toUpload = expenses.map(e => ({ ...e, user_id: user.id }));
+        await supabase.from('expenses').insert(toUpload);
+      }
+
+      // 3. Φόρτωση Κατηγοριών
+      const { data: remoteCats } = await supabase.from('categories').select('*');
+      if (remoteCats && remoteCats.length > 0) {
+        setCustomCategories(remoteCats as Category[]);
+      } else if (customCategories.length > 0) {
+        const toUpload = customCategories.map(c => ({ ...c, user_id: user.id }));
+        await supabase.from('categories').insert(toUpload);
+      }
+      
+      // 4. Φόρτωση Projects
+      const { data: remoteProjects } = await supabase.from('projects').select('*');
+      if (remoteProjects && remoteProjects.length > 0) {
+        setProjects(remoteProjects as Project[]);
+      } else if (projects.length > 0) {
+        const toUpload = projects.map(p => ({ ...p, user_id: user.id }));
+        await supabase.from('projects').insert(toUpload);
+      }
+    }
+
+    if (user) syncCloudData();
+  }, [user]);
+
+  // Local updates (μόνο αν δεν υπάρχει χρήστης, αλλιώς πάμε μέσω Cloud)
+  useEffect(() => { if (!user) saveLocale(locale); }, [locale, user]);
+  useEffect(() => { if (!user) saveExpenses(expenses); }, [expenses, user]);
+  useEffect(() => { if (!user) saveCategories(customCategories); }, [customCategories, user]);
+  useEffect(() => { if (!user) saveProjects(projects); }, [projects, user]);
+  useEffect(() => { if (!user) saveIncome(income); }, [income, user]);
+
+  // Συγχρονισμός Income & Background όταν αλλάζουν
+  useEffect(() => {
+    if (user && supabase) {
+      supabase.from('profiles').upsert({ 
+        id: user.id, 
+        income, 
+        locale, 
+        background,
+        updated_at: new Date().toISOString()
+      }).then(({ error }) => {
+        if (error) console.error('Error updating profile:', error);
+      });
+    }
+  }, [income, locale, background, user]);
+
   useEffect(() => {
     setBudgetInputValue(String(income));
   }, [income]);
@@ -279,7 +384,7 @@ export default function App() {
     setCategoryModalOpen(true);
   };
 
-  const handleSaveExpense = (event: FormEvent<HTMLFormElement>) => {
+  const handleSaveExpense = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedAmount = draft.amount.replace(',', '.');
     if (!normalizedAmount || Number.isNaN(Number(normalizedAmount))) {
@@ -299,6 +404,12 @@ export default function App() {
       comment: draft.comment.trim(),
       project: draft.project || undefined,
     };
+
+    // Αποθήκευση στο Supabase αν ο χρήστης είναι συνδεδεμένος
+    if (user && supabase) {
+      const { error } = await supabase.from('expenses').upsert({ ...nextExpense, user_id: user.id });
+      if (error) console.error('Error saving to cloud:', error);
+    }
 
     setExpenses((prev) => {
       const base = editingExpense ? prev.map((item) => (item.id === editingExpense.id ? nextExpense : item)) : [nextExpense, ...prev];
@@ -324,8 +435,13 @@ export default function App() {
     swipeStartRef.current = null;
   };
 
-  const handleDeleteExpense = (id: string) => {
+  const handleDeleteExpense = async (id: string) => {
     setExpenses((prev) => prev.filter((expense) => expense.id !== id));
+    
+    if (user && supabase) {
+      const { error } = await supabase.from('expenses').delete().eq('id', id);
+      if (error) console.error('Error deleting from cloud:', error);
+    }
   };
 
   const handleManageTouchStart = (id: string, clientX: number) => {
@@ -344,8 +460,13 @@ export default function App() {
     manageSwipeStartRef.current = null;
   };
 
-  const handleDeleteCategory = (id: string) => {
+  const handleDeleteCategory = async (id: string) => {
     setCustomCategories((prev) => prev.filter((category) => category.id !== id));
+
+    if (user && supabase) {
+      const { error } = await supabase.from('categories').delete().eq('id', id);
+      if (error) console.error('Error deleting category from cloud:', error);
+    }
   };
 
   const handleDeleteCategoryFromSettings = (id: string) => {
@@ -353,11 +474,17 @@ export default function App() {
     handleDeleteCategory(id);
   };
 
-  const handleDeleteProjectFromSettings = (id: string) => {
+  const handleDeleteProjectFromSettings = async (id: string) => {
     if (!window.confirm(t(locale, 'deleteProjectConfirm'))) return;
     const projectToDelete = projects.find((project) => project.id === id);
+    
     setProjects((prev) => prev.filter((project) => project.id !== id));
+    if (user && supabase) {
+      await supabase.from('projects').delete().eq('id', id);
+    }
+
     if (projectToDelete) {
+      // Ενημέρωση εξόδων τοπικά (στο cloud θα μπορούσε να γίνει με RPC ή trigger, αλλά το κάνουμε upsert αν χρειαστεί)
       setExpenses((prev) =>
         prev.map((expense) => (expense.project === projectToDelete.name ? { ...expense, project: undefined } : expense))
       );
@@ -367,7 +494,7 @@ export default function App() {
     }
   };
 
-  const handleAddProject = () => {
+  const handleAddProject = async () => {
     const trimmedName = newProjectName.trim();
     if (!trimmedName) {
       window.alert(t(locale, 'invalidProject'));
@@ -377,12 +504,20 @@ export default function App() {
       setNewProjectName('');
       return;
     }
-    setProjects((prev) => [...prev, { id: `project_${Date.now()}`, name: trimmedName }]);
+
+    const newProject = { id: `project_${Date.now()}`, name: trimmedName };
+    
+    if (user && supabase) {
+      const { error } = await supabase.from('projects').insert({ ...newProject, user_id: user.id });
+      if (error) console.error('Error adding project to cloud:', error);
+    }
+
+    setProjects((prev) => [...prev, newProject]);
     setNewProjectName('');
     setProjectModalOpen(false);
   };
 
-  const handleAddCategory = () => {
+  const handleAddCategory = async () => {
     const trimmedName = newCategoryName.trim();
     if (!trimmedName) {
       window.alert(t(locale, 'invalidCategory'));
@@ -392,10 +527,15 @@ export default function App() {
       setNewCategoryName('');
       return;
     }
-    setCustomCategories((prev) => [
-      ...prev,
-      { id: `custom_${Date.now()}`, name: trimmedName, emoji: newCategoryEmoji.trim() || '🏷️' },
-    ]);
+
+    const newCat = { id: `custom_${Date.now()}`, name: trimmedName, emoji: newCategoryEmoji.trim() || '🏷️' };
+    
+    if (user && supabase) {
+      const { error } = await supabase.from('categories').insert({ ...newCat, user_id: user.id });
+      if (error) console.error('Error adding category to cloud:', error);
+    }
+
+    setCustomCategories((prev) => [...prev, newCat]);
     if (categoryModalForExpense) {
       setDraft((prev) => ({
         ...prev,
@@ -409,18 +549,25 @@ export default function App() {
     setCategoryModalForExpense(false);
   };
 
-  const handleRenameCategory = (id: string) => {
+  const handleRenameCategory = async (id: string) => {
     const trimmedName = editingCategoryName.trim();
     if (!trimmedName) {
       window.alert(t(locale, 'invalidCategory'));
       return;
     }
+    
     const currentCategory = customCategories.find((category) => category.id === id);
     if (!currentCategory) return;
+
+    if (user && supabase) {
+      await supabase.from('categories').update({ name: trimmedName }).eq('id', id);
+    }
+
     setCustomCategories((prev) => prev.map((category) => (category.id === id ? { ...category, name: trimmedName } : category)));
     setExpenses((prev) =>
       prev.map((expense) => (expense.category === currentCategory.name ? { ...expense, category: trimmedName } : expense))
     );
+
     if (draft.category === currentCategory.name) {
       setDraft((prev) => ({ ...prev, category: trimmedName }));
     }
@@ -428,14 +575,20 @@ export default function App() {
     setEditingCategoryName('');
   };
 
-  const handleRenameProject = (id: string) => {
+  const handleRenameProject = async (id: string) => {
     const trimmedName = editingProjectName.trim();
     if (!trimmedName) {
       window.alert(t(locale, 'invalidProject'));
       return;
     }
+
     const currentProject = projects.find((project) => project.id === id);
     if (!currentProject) return;
+
+    if (user && supabase) {
+      await supabase.from('projects').update({ name: trimmedName }).eq('id', id);
+    }
+
     setProjects((prev) => prev.map((project) => (project.id === id ? { ...project, name: trimmedName } : project)));
     setExpenses((prev) =>
       prev.map((expense) => (expense.project === currentProject.name ? { ...expense, project: trimmedName } : expense))
@@ -518,6 +671,16 @@ export default function App() {
       });
     });
 
+    // Συγχρονισμός των εισαγόμενων δεδομένων με το Cloud
+    if (user && supabase) {
+      if (newCategories.length > 0) {
+        await supabase.from('categories').insert(newCategories.map(c => ({ ...c, user_id: user.id })));
+      }
+      if (importedExpenses.length > 0) {
+        await supabase.from('expenses').insert(importedExpenses.map(e => ({ ...e, user_id: user.id })));
+      }
+    }
+
     setCustomCategories((prev) => [...prev, ...newCategories]);
     setExpenses((prev) => [...importedExpenses, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
     event.target.value = '';
@@ -529,12 +692,64 @@ export default function App() {
   const progressPct = income > 0 ? Math.min(100, Math.max(0, (currentMonthSpend / income) * 100)) : 0;
   const showDashboard = tab !== 'settings';
 
+  const handleGoogleSignIn = async () => {
+    if (!supabase) return;
+    const redirectTo = window.location.origin;
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo },
+    });
+  };
+
+  const handleSignOut = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+  };
+
+  if (authLoading) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <h2>{t(locale, 'appTitle')}</h2>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <h2>{t(locale, 'authSetupTitle')}</h2>
+          <p>{t(locale, 'authSetupBody')}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!session || !user) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <h2>{t(locale, 'authRequired')}</h2>
+          <p>{t(locale, 'authRequiredBody')}</p>
+          <button className="primary-btn auth-btn" onClick={handleGoogleSignIn}>
+            {t(locale, 'continueWithGoogle')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page-shell">
       <header className="topbar">
         <div>
           <p className="eyebrow">Web</p>
           <h1>{t(locale, 'appTitle')}</h1>
+          <p className="auth-inline">
+            {t(locale, 'signedInAs')}: {user.email}
+          </p>
         </div>
         <nav className="tabbar">
           {([
@@ -703,6 +918,17 @@ export default function App() {
 
         {tab === 'settings' && (
           <section className="settings-grid">
+            <section className="panel">
+              <div className="settings-header">
+                <div>
+                  <h3>{t(locale, 'signedInAs')}</h3>
+                  <p>{user.email}</p>
+                </div>
+                <button className="ghost-btn" onClick={handleSignOut}>
+                  {t(locale, 'signOut')}
+                </button>
+              </div>
+            </section>
             <section className="panel">
               <div className="settings-header">
                 <div>

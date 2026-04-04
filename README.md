@@ -10,7 +10,7 @@ Separate web project for the expense tracker. This does not modify or replace th
 - Budget editing
 - Date range filtering
 - CSV import and export
-- Local browser storage
+- Cloud Sync with Supabase (PostgreSQL)
 
 ## What it intentionally skips
 
@@ -42,8 +42,15 @@ The simplest path is:
 2. In Vercel, set the root directory to `expense-tracker-web`.
 3. Build command: `npm run build`
 4. Output directory: `dist`
+5. **Environment Variables**: Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in Vercel settings.
+
+### Supabase Production Setup
+After deployment, you must update your Supabase Auth settings:
+1. Go to **Authentication > URL Configuration**.
+2. Add your Vercel URL to **Site URL** and **Redirect URLs** (e.g., `https://your-app.vercel.app/**`).
 
 ## Notes
 
-- Data is stored in browser `localStorage`, so each device keeps its own copy.
+- Data is primarily stored in Supabase for cross-device sync.
+- LocalStorage is used as a fallback for offline sessions.
 - CSV import/export is browser-native, which is better suited for web than the mobile file APIs used in the Expo app.
