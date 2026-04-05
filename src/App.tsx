@@ -405,10 +405,14 @@ export default function App() {
       // 2. Φόρτωση Εξόδων & Migration
       const { data: remoteExpenses } = await supabase.from('expenses').select('*').order('date', { ascending: false });
       if (remoteExpenses && remoteExpenses.length > 0) {
-        setExpenses(remoteExpenses.map(({ user_id: _, ...e }) => e as Expense));
+        setExpenses(remoteExpenses.map(({ user_id: _, receipt_file_id, ...e }) => ({
+          ...e,
+          amount: String(e.amount),
+          receiptFileId: receipt_file_id ?? e.receiptFileId ?? null
+        }) as Expense));
       } else if (expenses.length > 0) {
         // Migration: Αν η βάση είναι άδεια, ανέβασε τα τοπικά έξοδα
-        const toUpload = expenses.map(e => ({ ...e, user_id: user.id }));
+        const toUpload = expenses.map(({ receiptFileId, ...e }) => ({ ...e, receipt_file_id: receiptFileId ?? null, user_id: user.id }));
         await supabase.from('expenses').insert(toUpload);
       }
 
@@ -550,7 +554,7 @@ export default function App() {
     setEditingExpense(expense);
     setDraft({
       project: expense.project ?? '',
-      amount: expense.amount,
+      amount: String(expense.amount),
       category: expense.category,
       emoji: expense.emoji,
       date: expense.date,
@@ -579,7 +583,7 @@ export default function App() {
 
   const handleSaveExpense = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const normalizedAmount = draft.amount.replace(',', '.');
+    const normalizedAmount = String(draft.amount).replace(',', '.');
     if (!normalizedAmount || Number.isNaN(Number(normalizedAmount))) {
       window.alert(t(locale, 'invalidAmount'));
       return;
@@ -601,7 +605,8 @@ export default function App() {
 
     // Αποθήκευση στο Supabase αν ο χρήστης είναι συνδεδεμένος
     if (user && supabase) {
-      const { error } = await supabase.from('expenses').upsert({ ...nextExpense, user_id: user.id });
+      const { receiptFileId, ...dbExpense } = nextExpense;
+      const { error } = await supabase.from('expenses').upsert({ ...dbExpense, receipt_file_id: receiptFileId, user_id: user.id });
       if (error) console.error('Error saving to cloud:', error);
     }
 
@@ -856,7 +861,8 @@ export default function App() {
         await supabase.from('categories').insert(newCategories.map(c => ({ ...c, user_id: user.id })));
       }
       if (importedExpenses.length > 0) {
-        await supabase.from('expenses').insert(importedExpenses.map(e => ({ ...e, user_id: user.id })));
+          const toUpload = importedExpenses.map(({ receiptFileId, ...e }) => ({ ...e, receipt_file_id: receiptFileId ?? null, user_id: user.id }));
+          await supabase.from('expenses').insert(toUpload);
       }
     }
 
