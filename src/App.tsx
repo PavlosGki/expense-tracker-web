@@ -184,8 +184,8 @@ function Header({ locale, tab, setTab, user, onSignOut, onOpenFilter, hasActiveF
   }, []);
 
   return (
-    <header className="topbar">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <header className="topbar" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
         <div>
           <p className="eyebrow">Web</p>
           <h1>{t(locale, 'appTitle')}</h1>
@@ -1182,55 +1182,28 @@ export default function App() {
         {tab === 'settings' && (
           <section className="settings-grid">
             <section className="panel">
-              <div className="settings-header">
+              <div className="settings-header" style={{ marginBottom: '16px' }}>
                 <h3>{t(locale, 'setBudget')}</h3>
-                <strong className="settings-budget-value">{income.toFixed(0)} €</strong> {/* Display current budget */}
               </div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '16px' }}>
-                <label className="budget-input-wrap" style={{ flex: 1, margin: 0 }}>
+              <div style={{ backgroundColor: '#000', borderRadius: '20px', padding: '24px', border: '1px solid #2c2c2e', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
                   <input
                     type="number"
                     min="0"
                     step="5"
                     value={budgetInputValue}
-                    onChange={(event) => {
-                      setBudgetInputValue(event.target.value);
-                    }}
+                    onChange={(event) => setBudgetInputValue(event.target.value)}
                     onFocus={(event) => { if (event.target.value === '0') setBudgetInputValue(''); }}
                     onBlur={() => { if (budgetInputValue === '') setBudgetInputValue('0'); }}
+                    style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '48px', fontWeight: '800', textAlign: 'center', maxWidth: '180px', outline: 'none', padding: 0 }}
                   />
-                </label>
-                <button 
-                  className="primary-btn" 
-                  style={{ padding: '8px 16px', width: 'auto' }} 
-                  onClick={handleSaveBudget}
-                  disabled={Number(budgetInputValue) === income}
-                >
-                  {t(locale, 'save')}
-                </button>
-              </div>
-            </section>
-            <section className="panel">
-              <div className="settings-header">
-                <div>
-                  <h3>{t(locale, 'background')}</h3>
+                  <span style={{ fontSize: '32px', color: '#8e8e93', fontWeight: '600' }}>€</span>
                 </div>
-                <button className="ghost-btn" onClick={() => setBackgroundModalOpen(true)}>
-                  {t(locale, 'chooseBackground')}
-                </button>
-              </div>
-            </section>
-            <section className="panel">
-              <h3>{t(locale, 'manageData')}</h3>
-              <div className="settings-actions">
-                <button className="settings-card" onClick={handleImportClick}>
-                  <strong>{t(locale, 'importCsv')}</strong>
-                  <span>{t(locale, 'importCsvDesc')}</span>
-                </button>
-                <button className="settings-card" onClick={handleExportCsv}>
-                  <strong>{t(locale, 'exportCsv')}</strong>
-                  <span>{t(locale, 'exportCsvDesc')}</span>
-                </button>
+                {Number(budgetInputValue) !== income && (
+                  <button className="primary-btn" style={{ marginTop: '20px', width: '100%', borderRadius: '12px', padding: '14px', fontSize: '16px' }} onClick={handleSaveBudget}>
+                    {t(locale, 'save')}
+                  </button>
+                )}
               </div>
             </section>
             <section className="panel">
@@ -1399,6 +1372,29 @@ export default function App() {
                     </div>
                   ))
                 )}
+              </div>
+            </section>
+            <section className="panel">
+              <h3>{t(locale, 'manageData')}</h3>
+              <div className="settings-actions">
+                <button className="settings-card" onClick={handleImportClick}>
+                  <strong>{t(locale, 'importCsv')}</strong>
+                  <span>{t(locale, 'importCsvDesc')}</span>
+                </button>
+                <button className="settings-card" onClick={handleExportCsv}>
+                  <strong>{t(locale, 'exportCsv')}</strong>
+                  <span>{t(locale, 'exportCsvDesc')}</span>
+                </button>
+              </div>
+            </section>
+            <section className="panel">
+              <div className="settings-header">
+                <div>
+                  <h3>{t(locale, 'background')}</h3>
+                </div>
+                <button className="ghost-btn" onClick={() => setBackgroundModalOpen(true)}>
+                  {t(locale, 'chooseBackground')}
+                </button>
               </div>
             </section>
             <section className="panel">
