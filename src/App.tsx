@@ -185,26 +185,13 @@ function Header({ locale, tab, setTab, user, onSignOut, onOpenFilter, hasActiveF
 
   return (
     <header className="topbar">
-      <div>
-        <p className="eyebrow">Web</p>
-        <h1>{t(locale, 'appTitle')}</h1>
-      </div>
-      <nav className="tabbar">
-        <button 
-          className={`tab-chip ${hasActiveFilter ? 'active' : ''}`} 
-          onClick={onOpenFilter}
-          title="Φίλτρα"
-          style={{ padding: '6px 12px', display: 'flex', alignItems: 'center' }}
-        >
-          <span style={{ fontSize: '15px' }}>🔍</span>
-        </button>
-        {(['home', 'analytics', 'settings'] as const).map((id) => (
-          <button key={id} className={`tab-chip ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
-            {t(locale, id)}
-          </button>
-        ))}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <p className="eyebrow">Web</p>
+          <h1>{t(locale, 'appTitle')}</h1>
+        </div>
         
-        <div className="profile-menu-container" ref={dropdownRef} style={{ position: 'relative', display: 'flex', alignItems: 'center', marginLeft: 'auto' }}>
+        <div className="profile-menu-container" ref={dropdownRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <button 
             className="avatar-trigger"
             onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -214,11 +201,11 @@ function Header({ locale, tab, setTab, user, onSignOut, onOpenFilter, hasActiveF
               <img 
                 src={user.user_metadata.avatar_url} 
                 alt="Profile" 
-                style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.2)', marginLeft: '8px' }}
+                style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.2)' }}
                 referrerPolicy="no-referrer"
               />
             ) : (
-              <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#2c2c2e', marginLeft: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '14px', fontWeight: 'bold', border: '2px solid rgba(255,255,255,0.1)' }}>
+              <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#2c2c2e', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '14px', fontWeight: 'bold', border: '2px solid rgba(255,255,255,0.1)' }}>
                 {user.email?.charAt(0).toUpperCase()}
               </div>
             )}
@@ -268,6 +255,21 @@ function Header({ locale, tab, setTab, user, onSignOut, onOpenFilter, hasActiveF
             </div>
           )}
         </div>
+      </div>
+      <nav className="tabbar">
+        <button 
+          className={`tab-chip ${hasActiveFilter ? 'active' : ''}`} 
+          onClick={onOpenFilter}
+          title="Φίλτρα"
+          style={{ padding: '6px 12px', display: 'flex', alignItems: 'center' }}
+        >
+          <span style={{ fontSize: '15px' }}>🔍</span>
+        </button>
+        {(['home', 'analytics', 'settings'] as const).map((id) => (
+          <button key={id} className={`tab-chip ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
+            {t(locale, id)}
+          </button>
+        ))}
       </nav>
     </header>
   );
@@ -320,7 +322,6 @@ export default function App() {
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -1587,14 +1588,8 @@ export default function App() {
                 ) : (
                   <>
                     <input ref={receiptInputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={handleReceiptUpload} />
-                    <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleReceiptUpload} />
-                    
-                    <button type="button" className="ghost-btn" style={{ flex: 1, padding: '6px', display: 'flex', alignItems: 'center', gap: '8px', color: '#0a84ff', justifyContent: 'center' }} onClick={() => cameraInputRef.current?.click()}>
-                      <span style={{ fontSize: '18px' }}>📷</span> Φωτό
-                    </button>
-                    <div style={{ width: '1px', height: '20px', background: '#2c2c2e' }}></div>
-                    <button type="button" className="ghost-btn" style={{ flex: 1, padding: '6px', display: 'flex', alignItems: 'center', gap: '8px', color: '#0a84ff', justifyContent: 'center' }} onClick={() => receiptInputRef.current?.click()}>
-                      <span style={{ fontSize: '18px' }}>🧾</span> Αρχείο
+                    <button type="button" className="ghost-btn" style={{ padding: '6px', display: 'flex', alignItems: 'center', gap: '8px', color: '#0a84ff', width: '100%', justifyContent: 'center' }} onClick={() => receiptInputRef.current?.click()}>
+                      <span style={{ fontSize: '18px' }}>🧾</span> Ανέβασμα στο Drive
                     </button>
                   </>
                 )}
