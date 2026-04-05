@@ -448,7 +448,7 @@ export default function App() {
   useEffect(() => saveProjects(projects), [projects]);
   useEffect(() => saveIncome(income), [income]);
 
-  // Συγχρονισμός Income & Background όταν αλλάζουν
+  // Συγχρονισμός Locale & Background όταν αλλάζουν
   useEffect(() => {
     if (user && supabase && isInitialSyncDone) {
       supabase.from('profiles').upsert({ 
@@ -459,7 +459,7 @@ export default function App() {
         updated_at: new Date().toISOString()
       });
     }
-  }, [income, locale, background, user, isInitialSyncDone]);
+  }, [locale, background, user, isInitialSyncDone]);
 
   useEffect(() => {
     setBudgetInputValue(String(income));
@@ -933,6 +933,21 @@ export default function App() {
     await supabase.auth.signOut();
   };
 
+  const handleSaveBudget = async () => {
+    const finalIncome = Number(budgetInputValue) || 0;
+    setIncome(finalIncome);
+    if (user && supabase) {
+      const { error } = await supabase.from('profiles').upsert({ 
+        id: user.id, 
+        income: finalIncome, 
+        locale, 
+        background,
+        updated_at: new Date().toISOString()
+      });
+      if (error) console.error('Budget sync error:', error);
+    }
+  };
+
   const handleDeleteReceipt = async () => {
     if (!window.confirm('Είστε σίγουροι ότι θέλετε να διαγράψετε τη φωτογραφία; Θα διαγραφεί οριστικά και από το Google Drive.')) return;
     
@@ -1171,44 +1186,28 @@ export default function App() {
                 <h3>{t(locale, 'setBudget')}</h3>
                 <strong className="settings-budget-value">{income.toFixed(0)} €</strong> {/* Display current budget */}
               </div>
-              {/* Budget slider and input */}
-              <div className="budget-settings-block"> 
-                {/* Slider */}
-                <input
-                  className="budget-slider"
-                  type="range"
-                  min="0"
-                  max="5000"
-                  step="5"
-                  value={income}
-                  onChange={(event) => setIncome(Math.min(5000, Math.max(0, Number(event.target.value) || 0)))}
-                />
-                <label className="budget-input-wrap">
-                  {/* Manual Input */}
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '16px' }}>
+                <label className="budget-input-wrap" style={{ flex: 1, margin: 0 }}>
                   <input
                     type="number"
                     min="0"
-                    max="5000"
                     step="5"
                     value={budgetInputValue}
                     onChange={(event) => {
-                      const nextValue = event.target.value;
-                      setBudgetInputValue(nextValue);
-                      if (nextValue === '') return;
-                      setIncome(Math.min(5000, Math.max(0, Number(nextValue) || 0)));
+                      setBudgetInputValue(event.target.value);
                     }}
-                    onFocus={(event) => {
-                      if (event.target.value === '0') {
-                        setBudgetInputValue('');
-                      }
-                    }}
-                    onBlur={() => {
-                      if (budgetInputValue === '') {
-                        setBudgetInputValue('0');
-                      }
-                    }}
+                    onFocus={(event) => { if (event.target.value === '0') setBudgetInputValue(''); }}
+                    onBlur={() => { if (budgetInputValue === '') setBudgetInputValue('0'); }}
                   />
                 </label>
+                <button 
+                  className="primary-btn" 
+                  style={{ padding: '8px 16px', width: 'auto' }} 
+                  onClick={handleSaveBudget}
+                  disabled={Number(budgetInputValue) === income}
+                >
+                  {t(locale, 'save')}
+                </button>
               </div>
             </section>
             <section className="panel">
