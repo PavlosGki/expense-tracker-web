@@ -77,6 +77,7 @@ type ExpenseDraft = {
   emoji: string;
   date: string;
   comment: string;
+  receiptFileId: string | null;
 };
 
 const PRESET_BACKGROUNDS = [
@@ -126,6 +127,42 @@ function normalizeAmount(value: string) {
   const parts = normalized.split('.');
   return parts.length <= 1 ? normalized : `${parts[0]}.${parts.slice(1).join('').slice(0, 2)}`;
 }
+
+const compressImage = (file: File): Promise<Blob | File> => {
+  return new Promise((resolve) => {
+    if (!file.type.startsWith('image/')) {
+      resolve(file); // Αν είναι PDF, δεν κάνουμε συμπίεση
+      return;
+    }
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 1200;
+        const MAX_HEIGHT = 1600;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+        } else {
+          if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        canvas.toBlob((blob) => resolve(blob || file), 'image/jpeg', 0.7); // 70% ποιότητα
+      };
+      img.onerror = () => resolve(file);
+    };
+    reader.onerror = () => resolve(file);
+  });
+};
 
 /** Πρόταση: Διαχωρισμός του Header σε αυτόνομο Component **/
 function Header({ locale, tab, setTab, user, onSignOut, onOpenFilter, hasActiveFilter }: { 
@@ -270,6 +307,7 @@ export default function App() {
     emoji: DEFAULT_CATEGORIES[0].emoji,
     date: toLocalIsoDate(new Date()),
     comment: '',
+    receiptFileId: null,
   });
   const [newProjectName, setNewProjectName] = useState('');
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -280,6 +318,9 @@ export default function App() {
   const [editingProjectName, setEditingProjectName] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+  const receiptInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -499,6 +540,7 @@ export default function App() {
       emoji: DEFAULT_CATEGORIES[0].emoji,
       date: toLocalIsoDate(new Date()),
       comment: '',
+    receiptFileId: null,
     });
     setExpenseModalOpen(true);
   };
@@ -512,6 +554,7 @@ export default function App() {
       emoji: expense.emoji,
       date: expense.date,
       comment: expense.comment ?? '',
+    receiptFileId: expense.receiptFileId ?? null,
     });
     setExpenseModalOpen(true);
   };
@@ -552,6 +595,7 @@ export default function App() {
       date: draft.date,
       comment: draft.comment.trim(),
       project: draft.project || undefined,
+    receiptFileId: draft.receiptFileId || null,
     };
 
     // Αποθήκευση στο Supabase αν ο χρήστης είναι συνδεδεμένος
@@ -821,6 +865,45 @@ export default function App() {
     window.alert(t(locale, 'importDone'));
   };
 
+  const handleReceiptUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const token = session?.provider_token;
+    if (!token) {
+      window.alert('Το κλειδί του Google Drive έληξε (ανανεώνεται κάθε 1 ώρα). Παρακαλώ κάνε αποσύνδεση και ξανά σύνδεση για να ανεβάσεις απόδειξη.');
+      return;
+    }
+
+    setIsUploadingReceipt(true);
+    try {
+      const fileToUpload = await compressImage(file);
+      const mimeType = fileToUpload instanceof File ? file.type : 'image/jpeg';
+      
+      const metadata = { name: `Receipt_${Date.now()}_${file.name}`, mimeType };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+      form.append('file', fileToUpload);
+
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
+
+      if (!res.ok) throw new Error('Upload failed');
+
+      const data = await res.json();
+      setDraft(prev => ({ ...prev, receiptFileId: data.id }));
+    } catch (e) {
+      console.error(e);
+      window.alert('Αποτυχία ανεβάσματος στο Google Drive. Δοκίμασε ξανά.');
+    } finally {
+      setIsUploadingReceipt(false);
+      if (event.target) event.target.value = '';
+    }
+  };
+
   const currentMonthSpend = totals.month;
   const balance = income - currentMonthSpend;
   const progressPct = income > 0 ? Math.min(100, Math.max(0, (currentMonthSpend / income) * 100)) : 0;
@@ -831,7 +914,10 @@ export default function App() {
     const redirectTo = window.location.origin;
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo },
+      options: { 
+        redirectTo,
+        scopes: 'https://www.googleapis.com/auth/drive.file'
+      },
     });
   };
 
@@ -977,7 +1063,10 @@ export default function App() {
                                   {[expense.project, expense.date ? formatIsoDate(expense.date) : '', expense.comment?.trim()].filter(Boolean).join(' • ')}
                                 </small>
                               </span>
-                              <strong>{expense.amount} €</strong>
+                              <strong style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                {expense.receiptFileId && <span title="Έχει απόδειξη" style={{ fontSize: '16px' }}>🧾</span>}
+                                {expense.amount} €
+                              </strong>
                             </button>
                           </div>
                         ))}
@@ -1475,6 +1564,41 @@ export default function App() {
                 onChange={(event) => setDraft((prev) => ({ ...prev, comment: event.target.value }))}
                 placeholder={t(locale, 'commentPlaceholder')}
               />
+            </label>
+
+            <label>
+              <span>{t(locale, 'receipt') || 'Απόδειξη (Προαιρετικό)'}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px', background: '#000', padding: '8px 12px', borderRadius: '12px', border: '1px solid #2c2c2e' }}>
+                {draft.receiptFileId ? (
+                  <>
+                    <span style={{ fontSize: '20px' }}>🧾</span>
+                    <span style={{ color: '#32d74b', fontSize: '13px', fontWeight: 'bold' }}>Αποθηκεύτηκε</span>
+                    <a href={`https://drive.google.com/file/d/${draft.receiptFileId}/view`} target="_blank" rel="noreferrer" style={{ padding: '4px 8px', marginLeft: 'auto', fontSize: '13px', color: '#0a84ff', textDecoration: 'none', background: 'rgba(10, 132, 255, 0.1)', borderRadius: '6px', fontWeight: 'bold' }}>
+                      Προβολή
+                    </a>
+                    <button type="button" className="ghost-btn" style={{ padding: '4px 8px', fontSize: '13px', color: '#ff453a' }} onClick={() => setDraft(prev => ({ ...prev, receiptFileId: null }))}>
+                      {t(locale, 'delete')}
+                    </button>
+                  </>
+                ) : isUploadingReceipt ? (
+                  <div style={{ padding: '6px', width: '100%', textAlign: 'center', color: '#8e8e93', fontSize: '14px' }}>
+                    Συμπίεση & ανέβασμα...
+                  </div>
+                ) : (
+                  <>
+                    <input ref={receiptInputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={handleReceiptUpload} />
+                    <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleReceiptUpload} />
+                    
+                    <button type="button" className="ghost-btn" style={{ flex: 1, padding: '6px', display: 'flex', alignItems: 'center', gap: '8px', color: '#0a84ff', justifyContent: 'center' }} onClick={() => cameraInputRef.current?.click()}>
+                      <span style={{ fontSize: '18px' }}>📷</span> Φωτό
+                    </button>
+                    <div style={{ width: '1px', height: '20px', background: '#2c2c2e' }}></div>
+                    <button type="button" className="ghost-btn" style={{ flex: 1, padding: '6px', display: 'flex', alignItems: 'center', gap: '8px', color: '#0a84ff', justifyContent: 'center' }} onClick={() => receiptInputRef.current?.click()}>
+                      <span style={{ fontSize: '18px' }}>🧾</span> Αρχείο
+                    </button>
+                  </>
+                )}
+              </div>
             </label>
 
             {allCategories.find((category) => category.name === draft.category)?.isDefault !== true && (

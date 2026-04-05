@@ -22,6 +22,7 @@ export type Expense = {
   date: string;
   comment?: string;
   project?: string;
+  receiptFileId?: string | null;
 };
 
 export type HistoryGroup = {
