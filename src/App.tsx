@@ -1133,17 +1133,6 @@ export default function App() {
           <section className="settings-grid">
             <section className="panel">
               <div className="settings-header">
-                <div>
-                  <h3>{t(locale, 'signedInAs')}</h3>
-                  <p>{user.email}</p>
-                </div>
-                <button className="ghost-btn" onClick={handleSignOut}>
-                  {t(locale, 'signOut')}
-                </button>
-              </div>
-            </section>
-            <section className="panel">
-              <div className="settings-header">
                 <h3>{t(locale, 'setBudget')}</h3>
                 <strong className="settings-budget-value">{income.toFixed(0)} €</strong> {/* Display current budget */}
               </div>
@@ -1386,6 +1375,17 @@ export default function App() {
                 </div>
               </div>
             </section>
+            <section className="panel">
+              <div className="settings-header">
+                <div>
+                  <h3>{t(locale, 'signedInAs')}</h3>
+                  <p>{user.email}</p>
+                </div>
+                <button className="ghost-btn" onClick={handleSignOut}>
+                  {t(locale, 'signOut')}
+                </button>
+              </div>
+            </section>
             <input ref={importInputRef} className="hidden-input" type="file" accept=".csv,text/csv" onChange={handleImportCsv} />
           </section>
         )}
@@ -1572,11 +1572,25 @@ export default function App() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px', background: '#000', padding: '8px 12px', borderRadius: '12px', border: '1px solid #2c2c2e' }}>
                 {draft.receiptFileId ? (
                   <>
-                    <span style={{ fontSize: '20px' }}>🧾</span>
-                    <span style={{ color: '#32d74b', fontSize: '13px', fontWeight: 'bold' }}>Αποθηκεύτηκε</span>
-                    <a href={`https://drive.google.com/file/d/${draft.receiptFileId}/view`} target="_blank" rel="noreferrer" style={{ padding: '4px 8px', marginLeft: 'auto', fontSize: '13px', color: '#0a84ff', textDecoration: 'none', background: 'rgba(10, 132, 255, 0.1)', borderRadius: '6px', fontWeight: 'bold' }}>
-                      Προβολή
+                    <a 
+                      href={`https://drive.google.com/file/d/${draft.receiptFileId}/view`} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', borderRadius: '8px', background: '#1c1c1e', overflow: 'hidden', textDecoration: 'none', border: '1px solid #2c2c2e', flexShrink: 0 }}
+                      title="Προβολή απόδειξης"
+                    >
+                      <img 
+                        src={`https://drive.google.com/thumbnail?id=${draft.receiptFileId}&sz=w100`} 
+                        alt="Preview" 
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={(e) => { e.currentTarget.style.display = 'none'; (e.currentTarget.nextSibling as HTMLElement).style.display = 'block'; }}
+                      />
+                      <span style={{ fontSize: '20px', display: 'none' }}>🧾</span>
                     </a>
+                    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                      <span style={{ color: '#32d74b', fontSize: '13px', fontWeight: 'bold' }}>Αποθηκεύτηκε</span>
+                      <span style={{ color: '#8e8e93', fontSize: '11px' }}>Πατήστε για προβολή</span>
+                    </div>
                     <button type="button" className="ghost-btn" style={{ padding: '4px 8px', fontSize: '13px', color: '#ff453a' }} onClick={() => setDraft(prev => ({ ...prev, receiptFileId: null }))}>
                       {t(locale, 'delete')}
                     </button>
