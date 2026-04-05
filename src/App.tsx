@@ -1611,19 +1611,6 @@ export default function App() {
             )}
 
             <div className="modal-actions">
-              {editingExpense && (
-                <button
-                  type="button"
-                  className="danger-btn"
-                  style={{ marginRight: 'auto' }}
-                  onClick={() => {
-                    handleDeleteExpense(editingExpense.id);
-                    closeExpenseModal();
-                  }}
-                >
-                  {t(locale, 'delete')}
-                </button>
-              )}
               <button type="button" className="ghost-btn" onClick={closeExpenseModal}>
                 {t(locale, 'cancel')}
               </button>
@@ -1631,6 +1618,19 @@ export default function App() {
                 {editingExpense ? t(locale, 'update') : t(locale, 'add')}
               </button>
             </div>
+            {editingExpense && (
+              <button
+                type="button"
+                className="danger-btn"
+                style={{ width: '100%', marginTop: '10px' }}
+                onClick={() => {
+                  handleDeleteExpense(editingExpense.id);
+                  closeExpenseModal();
+                }}
+              >
+                {t(locale, 'delete')}
+              </button>
+            )}
           </form>
         </div>
       )}
