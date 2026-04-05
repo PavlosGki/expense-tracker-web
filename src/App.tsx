@@ -927,6 +927,24 @@ export default function App() {
     await supabase.auth.signOut();
   };
 
+  const handleDeleteReceipt = async () => {
+    if (!window.confirm('Είστε σίγουροι ότι θέλετε να διαγράψετε τη φωτογραφία; Θα διαγραφεί οριστικά και από το Google Drive.')) return;
+    
+    const fileId = draft.receiptFileId;
+    setDraft(prev => ({ ...prev, receiptFileId: null }));
+    
+    if (fileId && session?.provider_token) {
+      try {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${session.provider_token}` }
+        });
+      } catch (e) {
+        console.error('Failed to delete from Drive', e);
+      }
+    }
+  };
+
   if (authLoading) {
     return (
       <div className="auth-shell">
@@ -1065,7 +1083,18 @@ export default function App() {
                                 </small>
                               </span>
                               <strong style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                {expense.receiptFileId && <span title="Έχει απόδειξη" style={{ fontSize: '16px' }}>🧾</span>}
+                                {expense.receiptFileId && (
+                                  <a
+                                    href={`https://drive.google.com/file/d/${expense.receiptFileId}/view`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    title="Προβολή απόδειξης"
+                                    style={{ fontSize: '16px', textDecoration: 'none' }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    🧾
+                                  </a>
+                                )}
                                 {expense.amount} €
                               </strong>
                             </button>
@@ -1238,13 +1267,13 @@ export default function App() {
                               />
                             </div>
                             <button
-                              className="mini-icon-btn"
+                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 handleRenameProject(project.id);
                               }}
                             >
-                              ✓
+                              <svg viewBox="0 0 24 24" width="18" height="18" stroke="#32d74b" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                             </button>
                           </>
                         ) : (
@@ -1253,24 +1282,26 @@ export default function App() {
                               <strong>{project.name}</strong>
                             </div>
                             <button
-                              className="mini-icon-btn"
-                              style={{ color: '#ff453a', marginRight: '10px' }}
+                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', marginRight: '4px' }}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 handleDeleteProjectFromSettings(project.id);
                               }}
                             >
-                              🗑️
+                              <svg viewBox="0 0 24 24" width="18" height="18" stroke="#ff453a" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                             </button>
                             <button
-                              className="mini-icon-btn"
+                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 setEditingProjectId(project.id);
                                 setEditingProjectName(project.name);
                               }}
                             >
-                              ✎
+                              <svg viewBox="0 0 24 24" width="16" height="16" stroke="#0a84ff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M12 20h9" />
+                                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                              </svg>
                             </button>
                           </>
                         )}
@@ -1320,13 +1351,13 @@ export default function App() {
                               />
                             </div>
                             <button
-                              className="mini-icon-btn"
+                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 handleRenameCategory(category.id);
                               }}
                             >
-                              ✓
+                              <svg viewBox="0 0 24 24" width="18" height="18" stroke="#32d74b" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                             </button>
                           </>
                         ) : (
@@ -1336,24 +1367,26 @@ export default function App() {
                               <strong>{category.displayName}</strong>
                             </div>
                             <button
-                              className="mini-icon-btn"
-                              style={{ color: '#ff453a', marginRight: '10px' }}
+                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', marginRight: '4px' }}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 handleDeleteCategoryFromSettings(category.id);
                               }}
                             >
-                              🗑️
+                              <svg viewBox="0 0 24 24" width="18" height="18" stroke="#ff453a" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                             </button>
                             <button
-                              className="mini-icon-btn"
+                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 setEditingCategoryId(category.id);
                                 setEditingCategoryName(category.name);
                               }}
                             >
-                              ✎
+                              <svg viewBox="0 0 24 24" width="16" height="16" stroke="#0a84ff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M12 20h9" />
+                                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                              </svg>
                             </button>
                           </>
                         )}
@@ -1503,7 +1536,29 @@ export default function App() {
       {expenseModalOpen && (
         <div className="modal-backdrop" onClick={closeExpenseModal}>
           <form className="modal-card expense-form" onClick={(event) => event.stopPropagation()} onSubmit={handleSaveExpense}>
-            <h3>{editingExpense ? t(locale, 'editExpense') : t(locale, 'addExpense')}</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0 }}>{editingExpense ? t(locale, 'editExpense') : t(locale, 'addExpense')}</h3>
+              {editingExpense && (
+                <button
+                  type="button"
+                  style={{ background: 'none', border: 'none', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#ff453a' }}
+                  title={t(locale, 'delete')}
+                  onClick={() => {
+                    if (window.confirm('Είστε σίγουροι για τη διαγραφή αυτού του εξόδου;')) {
+                      handleDeleteExpense(editingExpense.id);
+                      closeExpenseModal();
+                    }
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    <line x1="10" y1="11" x2="10" y2="17" />
+                    <line x1="14" y1="11" x2="14" y2="17" />
+                  </svg>
+                </button>
+              )}
+            </div>
 
             <label>
               <span>{t(locale, 'project')}</span>
@@ -1569,9 +1624,9 @@ export default function App() {
 
             <label>
               <span>{t(locale, 'receipt') || 'Απόδειξη (Προαιρετικό)'}</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px', background: '#000', padding: '8px 12px', borderRadius: '12px', border: '1px solid #2c2c2e' }}>
+              <div style={{ marginTop: '6px' }}>
                 {draft.receiptFileId ? (
-                  <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#000', padding: '8px 12px', borderRadius: '12px', border: '1px solid #2c2c2e' }}>
                     <a 
                       href={`https://drive.google.com/file/d/${draft.receiptFileId}/view`} 
                       target="_blank" 
@@ -1591,10 +1646,13 @@ export default function App() {
                       <span style={{ color: '#32d74b', fontSize: '13px', fontWeight: 'bold' }}>Αποθηκεύτηκε</span>
                       <span style={{ color: '#8e8e93', fontSize: '11px' }}>Πατήστε για προβολή</span>
                     </div>
-                    <button type="button" className="ghost-btn" style={{ padding: '4px 8px', fontSize: '13px', color: '#ff453a' }} onClick={() => setDraft(prev => ({ ...prev, receiptFileId: null }))}>
-                      {t(locale, 'delete')}
+                    <button type="button" style={{ background: 'none', border: 'none', padding: '6px', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.8 }} title="Διαγραφή απόδειξης" onClick={(e) => { e.preventDefault(); handleDeleteReceipt(); }}>
+                      <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
                     </button>
-                  </>
+                  </div>
                 ) : isUploadingReceipt ? (
                   <div style={{ padding: '6px', width: '100%', textAlign: 'center', color: '#8e8e93', fontSize: '14px' }}>
                     Συμπίεση & ανέβασμα...
@@ -1602,8 +1660,8 @@ export default function App() {
                 ) : (
                   <>
                     <input ref={receiptInputRef} type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={handleReceiptUpload} />
-                    <button type="button" className="ghost-btn" style={{ padding: '6px', display: 'flex', alignItems: 'center', gap: '8px', color: '#0a84ff', width: '100%', justifyContent: 'center' }} onClick={() => receiptInputRef.current?.click()}>
-                      <span style={{ fontSize: '18px' }}>🧾</span> Ανέβασμα στο Drive
+                    <button type="button" style={{ background: 'none', border: 'none', padding: '8px 0', fontSize: '32px', cursor: 'pointer', display: 'block' }} onClick={(e) => { e.preventDefault(); receiptInputRef.current?.click(); }} title="Ανέβασμα απόδειξης">
+                      🧾
                     </button>
                   </>
                 )}
@@ -1632,19 +1690,6 @@ export default function App() {
                 {editingExpense ? t(locale, 'update') : t(locale, 'add')}
               </button>
             </div>
-            {editingExpense && (
-              <button
-                type="button"
-                className="danger-btn"
-                style={{ width: '100%', marginTop: '10px' }}
-                onClick={() => {
-                  handleDeleteExpense(editingExpense.id);
-                  closeExpenseModal();
-                }}
-              >
-                {t(locale, 'delete')}
-              </button>
-            )}
           </form>
         </div>
       )}
