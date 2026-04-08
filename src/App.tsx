@@ -128,6 +128,11 @@ function normalizeAmount(value: string) {
   return parts.length <= 1 ? normalized : `${parts[0]}.${parts.slice(1).join('').slice(0, 2)}`;
 }
 
+function extractFirstEmoji(value: string) {
+  const match = value.match(/\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?/u);
+  return match?.[0] ?? '';
+}
+
 const compressImage = (file: File): Promise<Blob | File> => {
   return new Promise((resolve) => {
     if (!file.type.startsWith('image/')) {
@@ -164,6 +169,27 @@ const compressImage = (file: File): Promise<Blob | File> => {
   });
 };
 
+function polarToCartesian(cx: number, cy: number, radius: number, angleDeg: number) {
+  const rad = (angleDeg * Math.PI) / 180;
+  return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+}
+
+function donutArcPath(cx: number, cy: number, innerR: number, outerR: number, startDeg: number, endDeg: number) {
+  const startOuter = polarToCartesian(cx, cy, outerR, startDeg);
+  const endOuter = polarToCartesian(cx, cy, outerR, endDeg);
+  const startInner = polarToCartesian(cx, cy, innerR, startDeg);
+  const endInner = polarToCartesian(cx, cy, innerR, endDeg);
+  const largeArc = endDeg - startDeg > 180 ? 1 : 0;
+
+  return [
+    `M ${startOuter.x} ${startOuter.y}`,
+    `A ${outerR} ${outerR} 0 ${largeArc} 1 ${endOuter.x} ${endOuter.y}`,
+    `L ${endInner.x} ${endInner.y}`,
+    `A ${innerR} ${innerR} 0 ${largeArc} 0 ${startInner.x} ${startInner.y}`,
+    'Z',
+  ].join(' ');
+}
+
 /** Πρόταση: Διαχωρισμός του Header σε αυτόνομο Component **/
 function Header({ locale, user, onSignOut }: { 
   locale: Locale, user: User, onSignOut: () => void 
@@ -187,7 +213,6 @@ function Header({ locale, user, onSignOut }: {
     <header className="topbar" style={{ marginBottom: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
         <div>
-          <p className="eyebrow">Web</p>
           <h1>{t(locale, 'appTitle')}</h1>
         </div>
         
@@ -280,6 +305,8 @@ export default function App() {
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [analyticsModal, setAnalyticsModal] = useState<null | 'pace' | 'donut'>(null);
+  const [activeDonutSliceName, setActiveDonutSliceName] = useState<string | null>(null);
   const [categoryModalForExpense, setCategoryModalForExpense] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [isInitialSyncDone, setIsInitialSyncDone] = useState(false);
@@ -514,7 +541,201 @@ export default function App() {
     () => getAnalyticsGroups(metaFilteredExpenses, range, listBounds.from, listBounds.to, locale).filter(g => g.items.length > 0),
     [metaFilteredExpenses, range, listBounds, locale]
   );
+  const parsedIncome = Number(income) || 0;
+  const currentMonthSpend = totals.month;
+  const progressPct = parsedIncome > 0 ? Math.min(100, Math.max(0, (currentMonthSpend / parsedIncome) * 100)) : 0;
   const hasActiveFilter = Boolean(fromDate || toDate || categoryFilter || projectFilter);
+  const donutPeriodExpenses = useMemo(() => {
+    const todayIso = toLocalIsoDate(new Date());
+    const todayMonthKey = todayIso.slice(0, 7);
+    const todayYearKey = todayIso.slice(0, 4);
+    const todayUtc = new Date(`${todayIso}T00:00:00Z`);
+    const isoDow0Mon = (todayUtc.getUTCDay() + 6) % 7;
+    const weekStartUtc = new Date(todayUtc);
+    weekStartUtc.setUTCDate(weekStartUtc.getUTCDate() - isoDow0Mon);
+    const weekEndUtcExclusive = new Date(weekStartUtc);
+    weekEndUtcExclusive.setUTCDate(weekEndUtcExclusive.getUTCDate() + 7);
+
+    return filteredExpenses.filter((expense) => {
+      if (!expense.date) return false;
+      if (range === 'day') return expense.date === todayIso;
+      if (range === 'month') return expense.date.slice(0, 7) === todayMonthKey;
+      if (range === 'year') return expense.date.slice(0, 4) === todayYearKey;
+      const expenseUtc = new Date(`${expense.date}T00:00:00Z`);
+      return expenseUtc >= weekStartUtc && expenseUtc < weekEndUtcExclusive;
+    });
+  }, [filteredExpenses, range]);
+  const daysInMonth = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  }, []);
+  const budgetPaceChart = useMemo(() => {
+    const now = new Date();
+    const currentDay = now.getDate();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const dailySpend = Array.from({ length: daysInMonth }, () => 0);
+
+    metaFilteredExpenses.forEach((expense) => {
+      if (!expense.date?.startsWith(monthKey)) return;
+      const day = Number(expense.date.slice(8, 10));
+      if (!Number.isFinite(day) || day < 1 || day > daysInMonth) return;
+      dailySpend[day - 1] += Number.parseFloat(expense.amount) || 0;
+    });
+
+    const actualCum: number[] = [];
+    let running = 0;
+    for (let i = 0; i < daysInMonth; i += 1) {
+      if (i + 1 <= currentDay) {
+        running += dailySpend[i];
+      }
+      actualCum.push(running);
+    }
+
+    const expectedCum = Array.from({ length: daysInMonth }, (_, i) => (parsedIncome * (i + 1)) / daysInMonth);
+    const maxY = Math.max(parsedIncome, actualCum[actualCum.length - 1] ?? 0, expectedCum[expectedCum.length - 1] ?? 0, 1);
+
+    const toPoints = (series: number[]) =>
+      series
+        .map((value, i) => {
+          const day = i + 1;
+          const x = daysInMonth > 1 ? ((day - 1) / (daysInMonth - 1)) * 100 : 0;
+          const y = 60 - (value / maxY) * 60;
+          return `${x.toFixed(2)},${y.toFixed(2)}`;
+        })
+        .join(' ');
+
+    return {
+      actualPoints: toPoints(actualCum.slice(0, currentDay)),
+      expectedPoints: toPoints(expectedCum),
+      actualToDate: actualCum[currentDay - 1] ?? 0,
+      expectedToDate: expectedCum[currentDay - 1] ?? 0,
+      currentDay,
+    };
+  }, [metaFilteredExpenses, parsedIncome, daysInMonth]);
+  const budgetPaceTarget = budgetPaceChart.expectedToDate;
+  const budgetPaceActual = budgetPaceChart.actualToDate;
+  const budgetPaceDelta = budgetPaceActual - budgetPaceTarget;
+  const categoryDonut = useMemo(() => {
+    const aggregate: Record<string, { amount: number; emoji: string }> = {};
+    donutPeriodExpenses.forEach((expense) => {
+      const key = getLocalizedCategoryName(locale, expense.category || t(locale, 'other'));
+      if (!aggregate[key]) aggregate[key] = { amount: 0, emoji: expense.emoji || '🏷️' };
+      aggregate[key].amount += Number.parseFloat(expense.amount) || 0;
+    });
+
+    const slices = Object.entries(aggregate)
+      .map(([name, data]) => ({ name, amount: data.amount, emoji: data.emoji }))
+      .sort((a, b) => b.amount - a.amount);
+
+    const total = slices.reduce((sum, row) => sum + row.amount, 0);
+    const colors = ['#0a84ff', '#32d74b', '#ff9f0a', '#bf5af2', '#ffd60a', '#8e8e93'];
+
+    let cursor = 0;
+    const gradientStops = slices
+      .map((slice, index) => {
+        const start = cursor;
+        const pct = total > 0 ? (slice.amount / total) * 100 : 0;
+        cursor += pct;
+        return `${colors[index % colors.length]} ${start}% ${cursor}%`;
+      })
+      .join(', ');
+
+    return {
+      total,
+      slices: slices.map((slice, index) => ({
+        ...slice,
+        color: colors[index % colors.length],
+        pct: total > 0 ? (slice.amount / total) * 100 : 0,
+      })),
+      gradient: gradientStops,
+    };
+  }, [donutPeriodExpenses, locale]);
+  const donutInteractiveSlices = useMemo(() => {
+    let startAngle = -90;
+    return categoryDonut.slices.map((slice, index) => {
+      const rawSweep = (slice.pct / 100) * 360;
+      const sweep = rawSweep >= 360 ? 359.999 : rawSweep;
+      const endAngle = startAngle + sweep;
+      const next = {
+        ...slice,
+        index,
+        startAngle,
+        endAngle,
+      };
+      startAngle = endAngle;
+      return next;
+    });
+  }, [categoryDonut]);
+  const activeDonutSlice = useMemo(() => {
+    if (donutInteractiveSlices.length === 0) return null;
+    return (
+      donutInteractiveSlices.find((slice) => slice.name === activeDonutSliceName) ??
+      donutInteractiveSlices[0]
+    );
+  }, [donutInteractiveSlices, activeDonutSliceName]);
+  useEffect(() => {
+    if (donutInteractiveSlices.length === 0) {
+      setActiveDonutSliceName(null);
+      return;
+    }
+    if (!activeDonutSliceName || !donutInteractiveSlices.some((slice) => slice.name === activeDonutSliceName)) {
+      setActiveDonutSliceName(donutInteractiveSlices[0].name);
+    }
+  }, [donutInteractiveSlices, activeDonutSliceName]);
+  const budgetPaceModalChart = useMemo(() => {
+    const now = new Date();
+    const currentDay = now.getDate();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const dailySpend = Array.from({ length: daysInMonth }, () => 0);
+
+    metaFilteredExpenses.forEach((expense) => {
+      if (!expense.date?.startsWith(monthKey)) return;
+      const day = Number(expense.date.slice(8, 10));
+      if (!Number.isFinite(day) || day < 1 || day > daysInMonth) return;
+      dailySpend[day - 1] += Number.parseFloat(expense.amount) || 0;
+    });
+
+    const actualCum: number[] = [];
+    let running = 0;
+    for (let i = 0; i < daysInMonth; i += 1) {
+      if (i + 1 <= currentDay) running += dailySpend[i];
+      actualCum.push(running);
+    }
+    const expectedCum = Array.from({ length: daysInMonth }, (_, i) => (parsedIncome * (i + 1)) / daysInMonth);
+
+    const width = 960;
+    const height = 460;
+    const margin = { top: 28, right: 28, bottom: 66, left: 58 };
+    const plotW = width - margin.left - margin.right;
+    const plotH = height - margin.top - margin.bottom;
+    const maxY = Math.max(parsedIncome, actualCum[actualCum.length - 1] ?? 0, 1);
+
+    const toX = (day: number) => margin.left + ((day - 1) / Math.max(1, daysInMonth - 1)) * plotW;
+    const toY = (value: number) => margin.top + (1 - value / maxY) * plotH;
+    const toPoints = (series: number[]) => series.map((value, i) => `${toX(i + 1)},${toY(value)}`).join(' ');
+
+    const yTicksBase = parsedIncome > 0 ? [0, parsedIncome / 2, parsedIncome] : [0, maxY / 2, maxY];
+    const yTicks = Array.from(new Set(yTicksBase.map((value) => Math.round(value)))).sort((a, b) => b - a);
+    const xTicks = Array.from(new Set([1, 15, daysInMonth])).sort((a, b) => a - b);
+
+    return {
+      width,
+      height,
+      margin,
+      xTicks,
+      yTicks,
+      actualPoints: toPoints(actualCum.slice(0, currentDay)),
+      expectedPoints: toPoints(expectedCum),
+      todayX: toX(currentDay),
+      actualEndX: toX(currentDay),
+      actualEndY: toY(actualCum[currentDay - 1] ?? 0),
+      actualEndLabelLeft: currentDay / daysInMonth > 0.72,
+      toX,
+      toY,
+      currentDay,
+      maxY,
+    };
+  }, [metaFilteredExpenses, daysInMonth, parsedIncome]);
 
   const openAddExpense = () => {
     setEditingExpense(null);
@@ -896,12 +1117,9 @@ export default function App() {
     }
   };
 
-  const parsedIncome = Number(income) || 0;
-  const currentMonthSpend = totals.month;
-  const balance = parsedIncome - currentMonthSpend;
-  const progressPct = parsedIncome > 0 ? Math.min(100, Math.max(0, (currentMonthSpend / parsedIncome) * 100)) : 0;
   const showDashboard = tab !== 'settings';
-  const isAnyModalOpen = expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen;
+  const isAnyModalOpen =
+    expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen || analyticsModal !== null;
 
   const handleGoogleSignIn = async () => {
     if (!supabase) return;
@@ -990,7 +1208,8 @@ export default function App() {
 
   return (
     <div className="page-shell">
-      <div 
+      <div
+        className="sticky-shell"
         style={{ 
           position: 'sticky', 
           top: 0, 
@@ -1009,20 +1228,6 @@ export default function App() {
           onSignOut={handleSignOut} 
         />
         
-        {showDashboard && (
-          <section className="panel budget-panel" style={{ marginBottom: '16px' }}>
-            <h3 className="budget-title">{t(locale, 'monthlyBudget')}</h3>
-            <div className="budget-bar-wrap">
-              <strong className="budget-spent-value">{currentMonthSpend.toFixed(2)} €</strong>
-              <div className="progress-track budget-track">
-                <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - progressPct)}%` }} />
-              </div>
-              <strong className="budget-bar-value">{parsedIncome.toFixed(2)} €</strong>
-            </div>
-            <p className="budget-consumed">{progressPct.toFixed(0)}% κατανάλωση</p>
-          </section>
-        )}
-
         <nav className="tabbar">
           <button 
             className={`tab-chip ${hasActiveFilter ? 'active' : ''}`} 
@@ -1038,36 +1243,68 @@ export default function App() {
             </button>
           ))}
         </nav>
+
+        {tab === 'home' && (
+          <section className="panel budget-panel" style={{ marginTop: '16px' }}>
+            <h3 className="budget-title">{t(locale, 'monthlyBudget')}</h3>
+            <div className="budget-bar-wrap">
+              <strong className="budget-spent-value">{currentMonthSpend.toFixed(2)} €</strong>
+              <div className="progress-track budget-track">
+                <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - progressPct)}%` }} />
+              </div>
+              <strong className="budget-bar-value">{parsedIncome.toFixed(2)} €</strong>
+            </div>
+            <p className="budget-consumed">{progressPct.toFixed(0)}% κατανάλωση</p>
+          </section>
+        )}
+
+        {showDashboard && tab === 'analytics' && (
+          <section className="range-scroll-row">
+            {RANGE_OPTIONS.map((option) => (
+              <button
+                key={option}
+                className={`tab-chip ${range === option ? 'active' : ''}`}
+                onClick={() => setRange(option)}
+              >
+                {t(locale, option)}
+              </button>
+            ))}
+          </section>
+        )}
       </div>
 
       <main className="main-grid">
         {showDashboard && (
           <>
-            <section className="summary-grid">
-              {RANGE_OPTIONS.map((option) => (
-                <button
-                  key={option}
-                  className={`summary-card ${range === option ? 'active' : ''}`}
-                  onClick={() => setRange(option)}
-                >
-                  <span>{t(locale, option)}</span>
-                  <strong>{totals[option].toFixed(2)} €</strong>
-                </button>
-              ))}
-            </section>
+            {tab === 'home' && (
+              <section className="summary-grid">
+                {RANGE_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    className={`summary-card ${range === option ? 'active' : ''}`}
+                    onClick={() => setRange(option)}
+                  >
+                    <span>{t(locale, option)}</span>
+                    <strong>{totals[option].toFixed(2)} €</strong>
+                  </button>
+                ))}
+              </section>
+            )}
 
-            <section className="toolbar-row">
-              <h3>{tab === 'analytics' ? t(locale, 'byCategory') : t(locale, 'history')}</h3>
-              {hasActiveFilter && (
-                <p className="filter-pill">
-                  {t(locale, 'activeFilters')}:{' '}
-                  {fromDate ? formatIsoDate(fromDate) : '—'} /{' '}
-                  {toDate ? formatIsoDate(toDate) : '—'} /{' '}
-                  {categoryFilterLabel || t(locale, 'allCategories')} /{' '}
-                  {projectFilterLabel}
-                </p>
-              )}
-            </section>
+            {tab === 'home' && (
+              <section className="toolbar-row">
+                <h3>{t(locale, 'history')}</h3>
+                {hasActiveFilter && (
+                  <p className="filter-pill">
+                    {t(locale, 'activeFilters')}:{' '}
+                    {fromDate ? formatIsoDate(fromDate) : '—'} /{' '}
+                    {toDate ? formatIsoDate(toDate) : '—'} /{' '}
+                    {categoryFilterLabel || t(locale, 'allCategories')} /{' '}
+                    {projectFilterLabel}
+                  </p>
+                )}
+              </section>
+            )}
 
             {/* Filter Modal is now controlled by the Header button */}
           </>
@@ -1143,52 +1380,122 @@ export default function App() {
         )}
 
         {tab === 'analytics' && (
-          <section className="panel list-panel">
-            {analyticsGroups.map((group) => {
-              const expanded = expandedGroups[group.id] ?? group.isCurrent;
-              const aggregate: Record<string, { amount: number; emoji: string }> = {};
-              group.items.forEach((expense) => {
-                const key = getLocalizedCategoryName(locale, expense.category || t(locale, 'other'));
-                if (!aggregate[key]) aggregate[key] = { amount: 0, emoji: expense.emoji || '🏷️' };
-                aggregate[key].amount += Number.parseFloat(expense.amount) || 0;
-              });
-              const rows = Object.entries(aggregate)
-                .map(([name, data]) => ({ name, ...data }))
-                .sort((a, b) => b.amount - a.amount);
-              const maxAmount = rows[0]?.amount ?? 0;
-              const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
+          <>
+            <section className="analytics-hero-grid">
+              <article
+                className="panel analytics-hero-card analytics-openable-card analytics-pace-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => setAnalyticsModal('pace')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setAnalyticsModal('pace');
+                  }
+                }}
+              >
+                <p className="panel-label">{t(locale, 'analyticsBudgetPaceTitle')}</p>
+                <div className="analytics-kpi-compact">
+                  <strong className={budgetPaceDelta > 0 ? 'danger' : 'success'}>
+                    {budgetPaceDelta >= 0 ? '+' : '-'}{Math.abs(budgetPaceDelta).toFixed(0)}€
+                  </strong>
+                  <small>{budgetPaceDelta > 0 ? t(locale, 'analyticsPaceOverText') : t(locale, 'analyticsPaceUnderText')}</small>
+                </div>
+                <div className="analytics-line-wrap">
+                  <svg className="analytics-line-chart" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
+                    <polyline className="analytics-line expected" points={budgetPaceChart.expectedPoints} />
+                    <polyline className="analytics-line actual" points={budgetPaceChart.actualPoints} />
+                  </svg>
+                </div>
+                <div className="analytics-line-legend">
+                  <span><i className="line-swatch expected" />{t(locale, 'analyticsExpectedLine')}</span>
+                  <span><i className="line-swatch actual" />{t(locale, 'analyticsActualLine')}</span>
+                </div>
+              </article>
 
-              return (
-                <article key={group.id} className="group-card">
-                  <button className="group-header" onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))}>
-                    <span>{group.title}</span>
-                    <strong>{totalAmount.toFixed(2)} €</strong>
-                  </button>
-                  {expanded && (
-                    <div className="group-body">
-                      {rows.length === 0 ? (
-                        <p className="empty-line">{t(locale, 'noExpenses')}</p>
-                      ) : (
-                        rows.map((row) => (
-                          <div key={`${group.id}_${row.name}`} className="bar-row">
-                            <div className="bar-label">
-                              <span>{row.emoji}</span>
-                              <strong>{row.name}</strong>
-                            </div>
-                            <div className="bar-track">
-                              <div className="bar-fill" style={{ width: `${maxAmount > 0 ? Math.max(18, (row.amount / maxAmount) * 100) : 18}%` }}>
-                                {row.amount.toFixed(0)} €
+              <article
+                className="panel analytics-hero-card analytics-openable-card"
+                role="button"
+                tabIndex={0}
+                onClick={() => setAnalyticsModal('donut')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setAnalyticsModal('donut');
+                  }
+                }}
+              >
+                <p className="panel-label">{t(locale, 'analyticsCategorySplitTitle')}</p>
+                <div
+                  className="analytics-donut"
+                  style={{
+                    background: categoryDonut.total > 0 ? `conic-gradient(${categoryDonut.gradient})` : 'conic-gradient(#2c2c2e 0% 100%)',
+                  }}
+                >
+                  <span>{categoryDonut.total > 0 ? `${categoryDonut.total.toFixed(0)}€` : '0€'}</span>
+                </div>
+              </article>
+            </section>
+
+            {hasActiveFilter && (
+              <section className="toolbar-row">
+                <p className="filter-pill">
+                  {t(locale, 'activeFilters')}:{' '}
+                  {fromDate ? formatIsoDate(fromDate) : '—'} /{' '}
+                  {toDate ? formatIsoDate(toDate) : '—'} /{' '}
+                  {categoryFilterLabel || t(locale, 'allCategories')} /{' '}
+                  {projectFilterLabel}
+                </p>
+              </section>
+            )}
+
+            <section className="panel list-panel">
+              {analyticsGroups.map((group) => {
+                const expanded = expandedGroups[group.id] ?? group.isCurrent;
+                const aggregate: Record<string, { amount: number; emoji: string }> = {};
+                group.items.forEach((expense) => {
+                  const key = getLocalizedCategoryName(locale, expense.category || t(locale, 'other'));
+                  if (!aggregate[key]) aggregate[key] = { amount: 0, emoji: expense.emoji || '🏷️' };
+                  aggregate[key].amount += Number.parseFloat(expense.amount) || 0;
+                });
+                const rows = Object.entries(aggregate)
+                  .map(([name, data]) => ({ name, ...data }))
+                  .sort((a, b) => b.amount - a.amount);
+                const maxAmount = rows[0]?.amount ?? 0;
+                const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
+
+                return (
+                  <article key={group.id} className="group-card">
+                    <button className="group-header" onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))}>
+                      <span>{group.title}</span>
+                      <strong>{totalAmount.toFixed(2)} €</strong>
+                    </button>
+                    {expanded && (
+                      <div className="group-body">
+                        {rows.length === 0 ? (
+                          <p className="empty-line">{t(locale, 'noExpenses')}</p>
+                        ) : (
+                          rows.map((row) => (
+                            <div key={`${group.id}_${row.name}`} className="bar-row">
+                              <div className="bar-label">
+                                <span>{row.emoji}</span>
+                                <strong>{row.name}</strong>
+                              </div>
+                              <div className="bar-track">
+                                <div className="bar-fill" style={{ width: `${maxAmount > 0 ? Math.max(18, (row.amount / maxAmount) * 100) : 18}%` }}>
+                                  {row.amount.toFixed(0)} €
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </article>
-              );
-            })}
-          </section>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </section>
+          </>
         )}
 
         {tab === 'settings' && (
@@ -1467,6 +1774,180 @@ export default function App() {
         </button>
       )}
 
+      {analyticsModal === 'pace' && (
+        <div className="modal-backdrop" onClick={() => setAnalyticsModal(null)}>
+          <div className="modal-card analytics-modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="analytics-modal-header">
+              <h3>{t(locale, 'analyticsBudgetPaceTitle')}</h3>
+              <button className="ghost-btn" onClick={() => setAnalyticsModal(null)}>
+                {t(locale, 'close')}
+              </button>
+            </div>
+
+            <svg
+              className="analytics-modal-line-svg"
+              viewBox={`0 0 ${budgetPaceModalChart.width} ${budgetPaceModalChart.height}`}
+              aria-label="Cumulative spending chart"
+            >
+              {budgetPaceModalChart.yTicks.map((tick) => (
+                <g key={`yt_${tick}`}>
+                  <line
+                    x1={budgetPaceModalChart.margin.left}
+                    y1={budgetPaceModalChart.toY(tick)}
+                    x2={budgetPaceModalChart.width - budgetPaceModalChart.margin.right}
+                    y2={budgetPaceModalChart.toY(tick)}
+                    className="analytics-modal-grid-line"
+                  />
+                  <text
+                    x={budgetPaceModalChart.margin.left - 10}
+                    y={budgetPaceModalChart.toY(tick) + 4}
+                    className="analytics-modal-axis-text"
+                    textAnchor="end"
+                  >
+                    {tick.toFixed(0)}€
+                  </text>
+                </g>
+              ))}
+
+              <line
+                x1={budgetPaceModalChart.margin.left}
+                y1={budgetPaceModalChart.margin.top}
+                x2={budgetPaceModalChart.margin.left}
+                y2={budgetPaceModalChart.height - budgetPaceModalChart.margin.bottom}
+                className="analytics-modal-axis-line"
+              />
+              <line
+                x1={budgetPaceModalChart.margin.left}
+                y1={budgetPaceModalChart.height - budgetPaceModalChart.margin.bottom}
+                x2={budgetPaceModalChart.width - budgetPaceModalChart.margin.right}
+                y2={budgetPaceModalChart.height - budgetPaceModalChart.margin.bottom}
+                className="analytics-modal-axis-line"
+              />
+
+              <polyline className="analytics-modal-line expected" points={budgetPaceModalChart.expectedPoints} />
+              <polyline className="analytics-modal-line actual" points={budgetPaceModalChart.actualPoints} />
+
+              <circle
+                cx={budgetPaceModalChart.actualEndX}
+                cy={budgetPaceModalChart.actualEndY}
+                r="5"
+                className="analytics-modal-actual-dot"
+              />
+
+              <g
+                transform={`translate(${budgetPaceModalChart.actualEndX + (budgetPaceModalChart.actualEndLabelLeft ? -12 : 12)}, ${budgetPaceModalChart.actualEndY - 14})`}
+              >
+                <rect
+                  x={budgetPaceModalChart.actualEndLabelLeft ? -150 : 0}
+                  y="-22"
+                  width="150"
+                  height="24"
+                  rx="7"
+                  className="analytics-modal-actual-chip"
+                />
+                <text
+                  x={budgetPaceModalChart.actualEndLabelLeft ? -142 : 8}
+                  y="-6"
+                  className="analytics-modal-actual-chip-text"
+                >
+                  {t(locale, 'analyticsMonthSpendLabel')}: {budgetPaceActual.toFixed(0)}€
+                </text>
+              </g>
+
+              <line
+                x1={budgetPaceModalChart.todayX}
+                y1={budgetPaceModalChart.margin.top}
+                x2={budgetPaceModalChart.todayX}
+                y2={budgetPaceModalChart.height - budgetPaceModalChart.margin.bottom}
+                className="analytics-modal-today-line"
+              />
+
+              {budgetPaceModalChart.xTicks.map((tick) => (
+                <g key={`xt_${tick}`}>
+                  <line
+                    x1={budgetPaceModalChart.toX(tick)}
+                    y1={budgetPaceModalChart.height - budgetPaceModalChart.margin.bottom}
+                    x2={budgetPaceModalChart.toX(tick)}
+                    y2={budgetPaceModalChart.height - budgetPaceModalChart.margin.bottom + 6}
+                    className="analytics-modal-axis-line"
+                  />
+                  <text
+                    x={budgetPaceModalChart.toX(tick)}
+                    y={budgetPaceModalChart.height - budgetPaceModalChart.margin.bottom + 24}
+                    className="analytics-modal-axis-text"
+                    textAnchor="middle"
+                  >
+                    {tick}
+                  </text>
+                </g>
+              ))}
+            </svg>
+
+            <div className="analytics-modal-meta">
+              <span><i className="line-swatch expected" />{t(locale, 'analyticsExpectedLine')}</span>
+              <span><i className="line-swatch actual" />{t(locale, 'analyticsActualLine')}</span>
+              <span>{t(locale, 'analyticsBudgetLabel')}: {parsedIncome.toFixed(0)}€</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {analyticsModal === 'donut' && (
+        <div className="modal-backdrop" onClick={() => setAnalyticsModal(null)}>
+          <div className="modal-card analytics-modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="analytics-modal-header">
+              <h3>{t(locale, 'analyticsCategorySplitTitle')}</h3>
+              <button className="ghost-btn" onClick={() => setAnalyticsModal(null)}>
+                {t(locale, 'close')}
+              </button>
+            </div>
+
+            <div className="analytics-donut-modal-layout">
+              <div className="analytics-donut-modal-canvas-wrap">
+                <svg className="analytics-donut-modal-svg" viewBox="0 0 320 320" aria-label="Category split donut">
+                  {donutInteractiveSlices.length > 0 ? (
+                    donutInteractiveSlices.map((slice) => {
+                      const isActive = activeDonutSlice?.name === slice.name;
+                      const outerR = isActive ? 118 : 110;
+                      return (
+                        <path
+                          key={`donut_modal_${slice.name}`}
+                          d={donutArcPath(160, 160, 72, outerR, slice.startAngle, slice.endAngle)}
+                          fill={slice.color}
+                          className="analytics-modal-donut-slice"
+                          onClick={() => setActiveDonutSliceName(slice.name)}
+                        />
+                      );
+                    })
+                  ) : (
+                    <path d={donutArcPath(160, 160, 72, 110, -90, 269.999)} fill="#2c2c2e" />
+                  )}
+                  <circle cx="160" cy="160" r="68" fill="#101113" stroke="#2c2c2e" />
+                  <text x="160" y="166" textAnchor="middle" className="analytics-modal-center-value">
+                    {categoryDonut.total.toFixed(0)}€
+                  </text>
+                  <text x="160" y="191" textAnchor="middle" className="analytics-modal-center-label">
+                    {t(locale, 'analyticsTotal')}
+                  </text>
+                </svg>
+              </div>
+
+              <div className="analytics-donut-modal-side">
+                {activeDonutSlice ? (
+                  <div className="analytics-slice-details">
+                    <strong>{activeDonutSlice.emoji} {activeDonutSlice.name}</strong>
+                    <p>{t(locale, 'analyticsAmount')}: {activeDonutSlice.amount.toFixed(2)}€</p>
+                    <p>{t(locale, 'analyticsShare')}: {activeDonutSlice.pct.toFixed(1)}%</p>
+                  </div>
+                ) : (
+                  <p className="analytics-empty-note">{t(locale, 'analyticsNoDataInPeriod')}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Background Modal */}
       {backgroundModalOpen && (
         <div className="modal-backdrop" onClick={() => setBackgroundModalOpen(false)}>
@@ -1711,20 +2192,6 @@ export default function App() {
               </div>
             </label>
 
-            {allCategories.find((category) => category.name === draft.category)?.isDefault !== true && (
-              <button
-                type="button"
-                className="danger-btn inline"
-                onClick={() => {
-                  const custom = customCategories.find((item) => item.name === draft.category);
-                  if (custom) handleDeleteCategory(custom.id);
-                  setDraft((prev) => ({ ...prev, category: DEFAULT_CATEGORIES[0].name, emoji: DEFAULT_CATEGORIES[0].emoji }));
-                }}
-              >
-                {t(locale, 'delete')}
-              </button>
-            )}
-
             <div className="modal-actions">
               <button type="button" className="ghost-btn" onClick={closeExpenseModal}>
                 {t(locale, 'cancel')}
@@ -1766,22 +2233,26 @@ export default function App() {
         <div className="modal-backdrop" onClick={() => { setCategoryModalOpen(false); setCategoryModalForExpense(false); }}>
           <form className="modal-card expense-form" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); handleAddCategory(); }}>
             <h3>{t(locale, 'addCategory')}</h3>
-            <div className="grid-two">
-              <label>
+            <div className="category-create-row">
+              <label className="category-create-emoji">
                 <span>{t(locale, 'emoji')}</span>
                 <input
-                  className="emoji-input"
+                  className="emoji-input category-emoji-input"
                   value={newCategoryEmoji}
-                  onChange={(event) => setNewCategoryEmoji(event.target.value)}
-                  onFocus={() => setNewCategoryEmoji('')}
-                  placeholder="😀"
-                  maxLength={2}
+                  onChange={(event) => setNewCategoryEmoji(extractFirstEmoji(event.target.value))}
+                  onPaste={(event) => {
+                    event.preventDefault();
+                    const pasted = event.clipboardData.getData('text');
+                    setNewCategoryEmoji(extractFirstEmoji(pasted));
+                  }}
+                  maxLength={4}
                   inputMode="text"
                 />
               </label>
-              <label>
+              <label className="category-create-name">
                 <span>{t(locale, 'categoryName')}</span>
                 <input
+                  className="category-name-input"
                   value={newCategoryName}
                   onChange={(event) => setNewCategoryName(event.target.value)}
                   onKeyDown={(event) => handleManageInputKeyDown(event, handleAddCategory)}
