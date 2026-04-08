@@ -489,6 +489,7 @@ export default function App() {
     document.body.style.backgroundAttachment = 'fixed';
   }, [background]);
 
+
   const allCategories = useMemo(() => [...DEFAULT_CATEGORIES, ...customCategories], [customCategories]);
   const displayCategories = useMemo(() => withDisplayName(locale, allCategories), [locale, allCategories]); // Ensure this is defined
   const filterFromDate = fromDate ? parseIsoDateToLocal(fromDate) : null;
@@ -565,56 +566,131 @@ export default function App() {
       return expenseUtc >= weekStartUtc && expenseUtc < weekEndUtcExclusive;
     });
   }, [filteredExpenses, range]);
-  const daysInMonth = useMemo(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  }, []);
-  const budgetPaceChart = useMemo(() => {
-    const now = new Date();
-    const currentDay = now.getDate();
-    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const dailySpend = Array.from({ length: daysInMonth }, () => 0);
+  const budgetPaceView = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayIso = toLocalIsoDate(today);
+    const daysInCurrentMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const dailyTarget = daysInCurrentMonth > 0 ? parsedIncome / daysInCurrentMonth : 0;
 
+    if (range === 'year') {
+      return {
+        mode: 'disabled' as const,
+        actual: 0,
+        target: 0,
+        delta: 0,
+        paceTextKey: 'analyticsPaceYearDisabled',
+      };
+    }
+
+    if (range === 'day') {
+      const actualDay = metaFilteredExpenses.reduce((sum, expense) => {
+        if (expense.date !== todayIso) return sum;
+        return sum + (Number.parseFloat(expense.amount) || 0);
+      }, 0);
+      const targetDay = dailyTarget;
+      const delta = actualDay - targetDay;
+
+      return {
+        mode: 'day' as const,
+        actual: actualDay,
+        target: targetDay,
+        delta,
+        paceTextKey: delta > 0 ? 'analyticsPaceOverText' : 'analyticsPaceUnderText',
+      };
+    }
+
+    const periodStart = new Date(today);
+    const totalDays = range === 'week' ? 7 : daysInCurrentMonth;
+    if (range === 'week') {
+      const isoDow0Mon = (today.getDay() + 6) % 7;
+      periodStart.setDate(today.getDate() - isoDow0Mon);
+    } else {
+      periodStart.setDate(1);
+    }
+    periodStart.setHours(0, 0, 0, 0);
+
+    const dateToIndex = new Map<string, number>();
+    for (let i = 0; i < totalDays; i += 1) {
+      const date = new Date(periodStart);
+      date.setDate(periodStart.getDate() + i);
+      dateToIndex.set(toLocalIsoDate(date), i);
+    }
+
+    const dailySpend = Array.from({ length: totalDays }, () => 0);
     metaFilteredExpenses.forEach((expense) => {
-      if (!expense.date?.startsWith(monthKey)) return;
-      const day = Number(expense.date.slice(8, 10));
-      if (!Number.isFinite(day) || day < 1 || day > daysInMonth) return;
-      dailySpend[day - 1] += Number.parseFloat(expense.amount) || 0;
+      if (!expense.date) return;
+      const index = dateToIndex.get(expense.date);
+      if (index == null) return;
+      dailySpend[index] += Number.parseFloat(expense.amount) || 0;
     });
+
+    const currentIndex = Math.max(
+      0,
+      Math.min(
+        totalDays - 1,
+        Math.floor((today.getTime() - periodStart.getTime()) / (24 * 60 * 60 * 1000))
+      )
+    );
 
     const actualCum: number[] = [];
     let running = 0;
-    for (let i = 0; i < daysInMonth; i += 1) {
-      if (i + 1 <= currentDay) {
-        running += dailySpend[i];
-      }
+    for (let i = 0; i < totalDays; i += 1) {
+      if (i <= currentIndex) running += dailySpend[i];
       actualCum.push(running);
     }
 
-    const expectedCum = Array.from({ length: daysInMonth }, (_, i) => (parsedIncome * (i + 1)) / daysInMonth);
-    const maxY = Math.max(parsedIncome, actualCum[actualCum.length - 1] ?? 0, expectedCum[expectedCum.length - 1] ?? 0, 1);
+    const targetBudget = range === 'week' ? dailyTarget * 7 : parsedIncome;
+    const expectedCum = Array.from({ length: totalDays }, (_, i) => (targetBudget * (i + 1)) / totalDays);
+    const actualToDate = actualCum[currentIndex] ?? 0;
+    const expectedToDate = expectedCum[currentIndex] ?? 0;
+    const delta = actualToDate - expectedToDate;
+    const maxY = Math.max(targetBudget, actualCum[actualCum.length - 1] ?? 0, expectedCum[expectedCum.length - 1] ?? 0, 1);
 
-    const toPoints = (series: number[]) =>
+    const toCardPoints = (series: number[]) =>
       series
         .map((value, i) => {
-          const day = i + 1;
-          const x = daysInMonth > 1 ? ((day - 1) / (daysInMonth - 1)) * 100 : 0;
+          const x = totalDays > 1 ? (i / (totalDays - 1)) * 100 : 0;
           const y = 60 - (value / maxY) * 60;
           return `${x.toFixed(2)},${y.toFixed(2)}`;
         })
         .join(' ');
 
+    const tickIndexes = range === 'week'
+      ? [0, 3, 6].filter((idx) => idx < totalDays)
+      : Array.from(new Set([0, 14, totalDays - 1])).sort((a, b) => a - b);
+    const tickLabels = tickIndexes.map((idx) => {
+      if (range === 'week') {
+        const date = new Date(periodStart);
+        date.setDate(periodStart.getDate() + idx);
+        return `${date.getDate()}/${date.getMonth() + 1}`;
+      }
+      return String(idx + 1);
+    });
+
     return {
-      actualPoints: toPoints(actualCum.slice(0, currentDay)),
-      expectedPoints: toPoints(expectedCum),
-      actualToDate: actualCum[currentDay - 1] ?? 0,
-      expectedToDate: expectedCum[currentDay - 1] ?? 0,
-      currentDay,
+      mode: 'chart' as const,
+      actual: actualToDate,
+      target: expectedToDate,
+      delta,
+      paceTextKey: delta > 0 ? 'analyticsPaceOverText' : 'analyticsPaceUnderText',
+      targetBudget,
+      periodSpendLabelKey: range === 'week' ? 'analyticsWeekSpendLabel' : 'analyticsMonthSpendLabel',
+      chart: {
+        totalDays,
+        currentIndex,
+        actualSeries: actualCum,
+        expectedSeries: expectedCum,
+        actualPoints: toCardPoints(actualCum.slice(0, currentIndex + 1)),
+        expectedPoints: toCardPoints(expectedCum),
+        tickIndexes,
+        tickLabels,
+      },
     };
-  }, [metaFilteredExpenses, parsedIncome, daysInMonth]);
-  const budgetPaceTarget = budgetPaceChart.expectedToDate;
-  const budgetPaceActual = budgetPaceChart.actualToDate;
-  const budgetPaceDelta = budgetPaceActual - budgetPaceTarget;
+  }, [metaFilteredExpenses, parsedIncome, range]);
+  const budgetPaceTarget = budgetPaceView.target;
+  const budgetPaceActual = budgetPaceView.actual;
+  const budgetPaceDelta = budgetPaceView.delta;
   const categoryDonut = useMemo(() => {
     const aggregate: Record<string, { amount: number; emoji: string }> = {};
     donutPeriodExpenses.forEach((expense) => {
@@ -683,40 +759,33 @@ export default function App() {
     }
   }, [donutInteractiveSlices, activeDonutSliceName]);
   const budgetPaceModalChart = useMemo(() => {
-    const now = new Date();
-    const currentDay = now.getDate();
-    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const dailySpend = Array.from({ length: daysInMonth }, () => 0);
-
-    metaFilteredExpenses.forEach((expense) => {
-      if (!expense.date?.startsWith(monthKey)) return;
-      const day = Number(expense.date.slice(8, 10));
-      if (!Number.isFinite(day) || day < 1 || day > daysInMonth) return;
-      dailySpend[day - 1] += Number.parseFloat(expense.amount) || 0;
-    });
-
-    const actualCum: number[] = [];
-    let running = 0;
-    for (let i = 0; i < daysInMonth; i += 1) {
-      if (i + 1 <= currentDay) running += dailySpend[i];
-      actualCum.push(running);
-    }
-    const expectedCum = Array.from({ length: daysInMonth }, (_, i) => (parsedIncome * (i + 1)) / daysInMonth);
+    if (budgetPaceView.mode !== 'chart') return null;
 
     const width = 960;
     const height = 460;
     const margin = { top: 28, right: 28, bottom: 66, left: 58 };
     const plotW = width - margin.left - margin.right;
     const plotH = height - margin.top - margin.bottom;
-    const maxY = Math.max(parsedIncome, actualCum[actualCum.length - 1] ?? 0, 1);
+    const totalDays = budgetPaceView.chart.totalDays;
+    const maxY = Math.max(
+      budgetPaceView.targetBudget,
+      budgetPaceView.chart.actualSeries[budgetPaceView.chart.actualSeries.length - 1] ?? 0,
+      1
+    );
 
-    const toX = (day: number) => margin.left + ((day - 1) / Math.max(1, daysInMonth - 1)) * plotW;
+    const toX = (index1Based: number) => margin.left + ((index1Based - 1) / Math.max(1, totalDays - 1)) * plotW;
     const toY = (value: number) => margin.top + (1 - value / maxY) * plotH;
     const toPoints = (series: number[]) => series.map((value, i) => `${toX(i + 1)},${toY(value)}`).join(' ');
 
-    const yTicksBase = parsedIncome > 0 ? [0, parsedIncome / 2, parsedIncome] : [0, maxY / 2, maxY];
+    const yTicksBase = budgetPaceView.targetBudget > 0
+      ? [0, budgetPaceView.targetBudget / 2, budgetPaceView.targetBudget]
+      : [0, maxY / 2, maxY];
     const yTicks = Array.from(new Set(yTicksBase.map((value) => Math.round(value)))).sort((a, b) => b - a);
-    const xTicks = Array.from(new Set([1, 15, daysInMonth])).sort((a, b) => a - b);
+    const xTicks = budgetPaceView.chart.tickIndexes.map((idx, i) => ({
+      index: idx + 1,
+      label: budgetPaceView.chart.tickLabels[i] ?? String(idx + 1),
+    }));
+    const todayIndex = budgetPaceView.chart.currentIndex + 1;
 
     return {
       width,
@@ -724,18 +793,21 @@ export default function App() {
       margin,
       xTicks,
       yTicks,
-      actualPoints: toPoints(actualCum.slice(0, currentDay)),
-      expectedPoints: toPoints(expectedCum),
-      todayX: toX(currentDay),
-      actualEndX: toX(currentDay),
-      actualEndY: toY(actualCum[currentDay - 1] ?? 0),
-      actualEndLabelLeft: currentDay / daysInMonth > 0.72,
+      actualPoints: toPoints(budgetPaceView.chart.actualSeries.slice(0, todayIndex)),
+      expectedPoints: toPoints(budgetPaceView.chart.expectedSeries),
+      todayX: toX(todayIndex),
+      actualEndX: toX(todayIndex),
+      actualEndY: toY(budgetPaceView.chart.actualSeries[todayIndex - 1] ?? 0),
+      actualEndLabelLeft: todayIndex / totalDays > 0.72,
       toX,
       toY,
-      currentDay,
-      maxY,
     };
-  }, [metaFilteredExpenses, daysInMonth, parsedIncome]);
+  }, [budgetPaceView]);
+  useEffect(() => {
+    if (analyticsModal === 'pace' && budgetPaceView.mode !== 'chart') {
+      setAnalyticsModal(null);
+    }
+  }, [analyticsModal, budgetPaceView.mode]);
 
   const openAddExpense = () => {
     setEditingExpense(null);
@@ -1217,9 +1289,9 @@ export default function App() {
           backgroundColor: 'rgba(5, 5, 5, 0.85)', 
           backdropFilter: 'blur(16px)', 
           WebkitBackdropFilter: 'blur(16px)', 
-          margin: '-24px -16px 16px -16px', 
+          margin: '-24px -16px 0 -16px', 
           padding: '24px 16px 16px 16px', 
-          borderBottom: '1px solid rgba(255, 255, 255, 0.05)' 
+          borderBottom: 'none' 
         }}
       >
         <Header 
@@ -1288,21 +1360,6 @@ export default function App() {
                     <strong>{totals[option].toFixed(2)} €</strong>
                   </button>
                 ))}
-              </section>
-            )}
-
-            {tab === 'home' && (
-              <section className="toolbar-row">
-                <h3>{t(locale, 'history')}</h3>
-                {hasActiveFilter && (
-                  <p className="filter-pill">
-                    {t(locale, 'activeFilters')}:{' '}
-                    {fromDate ? formatIsoDate(fromDate) : '—'} /{' '}
-                    {toDate ? formatIsoDate(toDate) : '—'} /{' '}
-                    {categoryFilterLabel || t(locale, 'allCategories')} /{' '}
-                    {projectFilterLabel}
-                  </p>
-                )}
               </section>
             )}
 
@@ -1383,12 +1440,14 @@ export default function App() {
           <>
             <section className="analytics-hero-grid">
               <article
-                className="panel analytics-hero-card analytics-openable-card analytics-pace-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => setAnalyticsModal('pace')}
+                className={`panel analytics-hero-card analytics-pace-card ${budgetPaceView.mode === 'chart' ? 'analytics-openable-card' : ''}`}
+                role={budgetPaceView.mode === 'chart' ? 'button' : undefined}
+                tabIndex={budgetPaceView.mode === 'chart' ? 0 : undefined}
+                onClick={() => {
+                  if (budgetPaceView.mode === 'chart') setAnalyticsModal('pace');
+                }}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
+                  if (budgetPaceView.mode === 'chart' && (event.key === 'Enter' || event.key === ' ')) {
                     event.preventDefault();
                     setAnalyticsModal('pace');
                   }
@@ -1399,18 +1458,37 @@ export default function App() {
                   <strong className={budgetPaceDelta > 0 ? 'danger' : 'success'}>
                     {budgetPaceDelta >= 0 ? '+' : '-'}{Math.abs(budgetPaceDelta).toFixed(0)}€
                   </strong>
-                  <small>{budgetPaceDelta > 0 ? t(locale, 'analyticsPaceOverText') : t(locale, 'analyticsPaceUnderText')}</small>
+                  <small>{t(locale, budgetPaceView.paceTextKey)}</small>
                 </div>
-                <div className="analytics-line-wrap">
-                  <svg className="analytics-line-chart" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
-                    <polyline className="analytics-line expected" points={budgetPaceChart.expectedPoints} />
-                    <polyline className="analytics-line actual" points={budgetPaceChart.actualPoints} />
-                  </svg>
-                </div>
-                <div className="analytics-line-legend">
-                  <span><i className="line-swatch expected" />{t(locale, 'analyticsExpectedLine')}</span>
-                  <span><i className="line-swatch actual" />{t(locale, 'analyticsActualLine')}</span>
-                </div>
+                {budgetPaceView.mode === 'chart' && (
+                  <>
+                    <div className="analytics-line-wrap">
+                      <svg className="analytics-line-chart" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
+                        <polyline className="analytics-line expected" points={budgetPaceView.chart.expectedPoints} />
+                        <polyline className="analytics-line actual" points={budgetPaceView.chart.actualPoints} />
+                      </svg>
+                    </div>
+                    <div className="analytics-line-legend">
+                      <span><i className="line-swatch expected" />{t(locale, 'analyticsExpectedLine')}</span>
+                      <span><i className="line-swatch actual" />{t(locale, 'analyticsActualLine')}</span>
+                    </div>
+                  </>
+                )}
+                {budgetPaceView.mode === 'day' && (
+                  <div className="analytics-pace-day-metrics">
+                    <div className="analytics-pace-day-row">
+                      <span>{t(locale, 'analyticsActualLine')}</span>
+                      <strong>{budgetPaceActual.toFixed(2)}€</strong>
+                    </div>
+                    <div className="analytics-pace-day-row">
+                      <span>{t(locale, 'analyticsExpectedLine')}</span>
+                      <strong>{budgetPaceTarget.toFixed(2)}€</strong>
+                    </div>
+                  </div>
+                )}
+                {budgetPaceView.mode === 'disabled' && (
+                  <p className="analytics-pace-note">{t(locale, 'analyticsPaceYearDisabled')}</p>
+                )}
               </article>
 
               <article
@@ -1774,7 +1852,7 @@ export default function App() {
         </button>
       )}
 
-      {analyticsModal === 'pace' && (
+      {analyticsModal === 'pace' && budgetPaceModalChart && budgetPaceView.mode === 'chart' && (
         <div className="modal-backdrop" onClick={() => setAnalyticsModal(null)}>
           <div className="modal-card analytics-modal-card" onClick={(event) => event.stopPropagation()}>
             <div className="analytics-modal-header">
@@ -1782,6 +1860,12 @@ export default function App() {
               <button className="ghost-btn" onClick={() => setAnalyticsModal(null)}>
                 {t(locale, 'close')}
               </button>
+            </div>
+            <div className="analytics-kpi-compact">
+              <strong className={budgetPaceDelta > 0 ? 'danger' : 'success'}>
+                {budgetPaceDelta >= 0 ? '+' : '-'}{Math.abs(budgetPaceDelta).toFixed(0)}€
+              </strong>
+              <small>{budgetPaceDelta > 0 ? t(locale, 'analyticsPaceOverText') : t(locale, 'analyticsPaceUnderText')}</small>
             </div>
 
             <svg
@@ -1850,7 +1934,7 @@ export default function App() {
                   y="-6"
                   className="analytics-modal-actual-chip-text"
                 >
-                  {t(locale, 'analyticsMonthSpendLabel')}: {budgetPaceActual.toFixed(0)}€
+                  {t(locale, budgetPaceView.periodSpendLabelKey)}: {budgetPaceActual.toFixed(0)}€
                 </text>
               </g>
 
@@ -1863,21 +1947,21 @@ export default function App() {
               />
 
               {budgetPaceModalChart.xTicks.map((tick) => (
-                <g key={`xt_${tick}`}>
+                <g key={`xt_${tick.index}`}>
                   <line
-                    x1={budgetPaceModalChart.toX(tick)}
+                    x1={budgetPaceModalChart.toX(tick.index)}
                     y1={budgetPaceModalChart.height - budgetPaceModalChart.margin.bottom}
-                    x2={budgetPaceModalChart.toX(tick)}
+                    x2={budgetPaceModalChart.toX(tick.index)}
                     y2={budgetPaceModalChart.height - budgetPaceModalChart.margin.bottom + 6}
                     className="analytics-modal-axis-line"
                   />
                   <text
-                    x={budgetPaceModalChart.toX(tick)}
+                    x={budgetPaceModalChart.toX(tick.index)}
                     y={budgetPaceModalChart.height - budgetPaceModalChart.margin.bottom + 24}
                     className="analytics-modal-axis-text"
                     textAnchor="middle"
                   >
-                    {tick}
+                    {tick.label}
                   </text>
                 </g>
               ))}
