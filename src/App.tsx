@@ -165,8 +165,8 @@ const compressImage = (file: File): Promise<Blob | File> => {
 };
 
 /** Πρόταση: Διαχωρισμός του Header σε αυτόνομο Component **/
-function Header({ locale, tab, setTab, user, onSignOut, onOpenFilter, hasActiveFilter }: { 
-  locale: Locale, tab: TabId, setTab: (t: TabId) => void, user: User, onSignOut: () => void, onOpenFilter: () => void, hasActiveFilter: boolean 
+function Header({ locale, user, onSignOut }: { 
+  locale: Locale, user: User, onSignOut: () => void 
 }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -184,7 +184,7 @@ function Header({ locale, tab, setTab, user, onSignOut, onOpenFilter, hasActiveF
   }, []);
 
   return (
-    <header className="topbar" style={{ display: 'flex', flexDirection: 'column' }}>
+    <header className="topbar" style={{ marginBottom: '16px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
         <div>
           <p className="eyebrow">Web</p>
@@ -256,21 +256,6 @@ function Header({ locale, tab, setTab, user, onSignOut, onOpenFilter, hasActiveF
           )}
         </div>
       </div>
-      <nav className="tabbar">
-        <button 
-          className={`tab-chip ${hasActiveFilter ? 'active' : ''}`} 
-          onClick={onOpenFilter}
-          title="Φίλτρα"
-          style={{ padding: '6px 12px', display: 'flex', alignItems: 'center' }}
-        >
-          <span style={{ fontSize: '15px' }}>🔍</span>
-        </button>
-        {(['home', 'analytics', 'settings'] as const).map((id) => (
-          <button key={id} className={`tab-chip ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
-            {t(locale, id)}
-          </button>
-        ))}
-      </nav>
     </header>
   );
 }
@@ -911,10 +896,12 @@ export default function App() {
     }
   };
 
+  const parsedIncome = Number(income) || 0;
   const currentMonthSpend = totals.month;
-  const balance = income - currentMonthSpend;
-  const progressPct = income > 0 ? Math.min(100, Math.max(0, (currentMonthSpend / income) * 100)) : 0;
+  const balance = parsedIncome - currentMonthSpend;
+  const progressPct = parsedIncome > 0 ? Math.min(100, Math.max(0, (currentMonthSpend / parsedIncome) * 100)) : 0;
   const showDashboard = tab !== 'settings';
+  const isAnyModalOpen = expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen;
 
   const handleGoogleSignIn = async () => {
     if (!supabase) return;
@@ -1003,31 +990,59 @@ export default function App() {
 
   return (
     <div className="page-shell">
-      <Header 
-        locale={locale} 
-        tab={tab} 
-        setTab={setTab} 
-        user={user} 
-        onSignOut={handleSignOut} 
-        onOpenFilter={() => setFilterModalOpen(true)}
-        hasActiveFilter={hasActiveFilter}
-      />
-      
+      <div 
+        style={{ 
+          position: 'sticky', 
+          top: 0, 
+          zIndex: 40, 
+          backgroundColor: 'rgba(5, 5, 5, 0.85)', 
+          backdropFilter: 'blur(16px)', 
+          WebkitBackdropFilter: 'blur(16px)', 
+          margin: '-24px -16px 16px -16px', 
+          padding: '24px 16px 16px 16px', 
+          borderBottom: '1px solid rgba(255, 255, 255, 0.05)' 
+        }}
+      >
+        <Header 
+          locale={locale} 
+          user={user} 
+          onSignOut={handleSignOut} 
+        />
+        
+        {showDashboard && (
+          <section className="panel budget-panel" style={{ marginBottom: '16px' }}>
+            <h3 className="budget-title">{t(locale, 'monthlyBudget')}</h3>
+            <div className="budget-bar-wrap">
+              <strong className="budget-spent-value">{currentMonthSpend.toFixed(2)} €</strong>
+              <div className="progress-track budget-track">
+                <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - progressPct)}%` }} />
+              </div>
+              <strong className="budget-bar-value">{parsedIncome.toFixed(2)} €</strong>
+            </div>
+            <p className="budget-consumed">{progressPct.toFixed(0)}% κατανάλωση</p>
+          </section>
+        )}
+
+        <nav className="tabbar">
+          <button 
+            className={`tab-chip ${hasActiveFilter ? 'active' : ''}`} 
+            onClick={() => setFilterModalOpen(true)}
+            title="Φίλτρα"
+            style={{ padding: '6px 12px', display: 'flex', alignItems: 'center' }}
+          >
+            <span style={{ fontSize: '15px' }}>🔍</span>
+          </button>
+          {(['home', 'analytics', 'settings'] as const).map((id) => (
+            <button key={id} className={`tab-chip ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
+              {t(locale, id)}
+            </button>
+          ))}
+        </nav>
+      </div>
+
       <main className="main-grid">
         {showDashboard && (
           <>
-            <section className="panel budget-panel">
-              <h3 className="budget-title">{t(locale, 'monthlyBudget')}</h3>
-              <div className="budget-bar-wrap">
-                <strong className="budget-spent-value">{currentMonthSpend.toFixed(2)} €</strong>
-                <div className="progress-track budget-track">
-                  <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - progressPct)}%` }} />
-                </div>
-                <strong className="budget-bar-value">{income.toFixed(2)} €</strong>
-              </div>
-              <p className="budget-consumed">{progressPct.toFixed(0)}% κατανάλωση</p>
-            </section>
-
             <section className="summary-grid">
               {RANGE_OPTIONS.map((option) => (
                 <button
@@ -1060,9 +1075,6 @@ export default function App() {
 
         {tab === 'home' && (
           <section className="panel list-panel">
-            <div className="action-row">
-              <button className="primary-btn" onClick={openAddExpense}>{t(locale, 'addExpense')}</button>
-            </div>
             {historyGroups.every((group) => group.items.length === 0) ? (
               <div className="empty-state">
                 <p>{t(locale, 'noExpenses')}</p>
@@ -1424,6 +1436,36 @@ export default function App() {
           </section>
         )}
       </main>
+
+      {/* Floating Action Button (FAB) for adding expenses */}
+      {showDashboard && !isAnyModalOpen && (
+        <button
+          onClick={openAddExpense}
+          style={{
+            position: 'fixed',
+            bottom: '40px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '64px',
+            height: '64px',
+            borderRadius: '32px',
+            backgroundColor: '#0a84ff',
+            color: '#fff',
+            border: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '40px',
+            fontWeight: '300',
+            boxShadow: '0 8px 32px rgba(10, 132, 255, 0.4), 0 2px 8px rgba(0, 0, 0, 0.5)',
+            cursor: 'pointer',
+            zIndex: 10
+          }}
+          title={t(locale, 'addExpense')}
+        >
+          <span style={{ marginTop: '-4px' }}>+</span>
+        </button>
+      )}
 
       {/* Background Modal */}
       {backgroundModalOpen && (

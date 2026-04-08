@@ -632,6 +632,7 @@ button {
   display: grid;
   place-items: center;
   padding: 18px;
+  z-index: 1000;
 }
 
 .modal-card {
