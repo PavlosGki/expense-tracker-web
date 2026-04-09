@@ -33,42 +33,24 @@ import {
   type StoredBackground
 } from './lib/storage';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { Header } from './components/Header';
+import {
+  ALL_CATEGORIES_VALUE,
+  ALL_PROJECTS_VALUE,
+  DEFAULT_CATEGORIES,
+  donutArcPath,
+  extractFirstEmoji,
+  getBackgroundCss,
+  NEW_CATEGORY_VALUE,
+  NO_PROJECT_VALUE,
+  normalizeAmount,
+  PRESET_BACKGROUNDS,
+  RANGE_OPTIONS,
+  WITHOUT_PROJECT_VALUE,
+} from './config/appConstants';
+import { useBudgetPace } from './hooks/useBudgetPace';
 import './styles.css';
 import type { Category, Expense, Locale, Project, Range, TabId } from './types';
-
-const DEFAULT_CATEGORIES: Category[] = [
-  { id: 'c1', name: 'Φαγητό', emoji: '🍔', isDefault: true },
-  { id: 'c2', name: 'Supermarket', emoji: '🛒', isDefault: true },
-  { id: 'c3', name: 'Καφές', emoji: '☕', isDefault: true },
-  { id: 'c4', name: 'Διασκέδαση', emoji: '🍻', isDefault: true },
-  { id: 'c5', name: 'Λογαριασμοί', emoji: '💡', isDefault: true },
-  { id: 'c6', name: 'Καύσιμα', emoji: '⛽', isDefault: true },
-  { id: 'c7', name: 'Διόδια', emoji: '🛣️', isDefault: true },
-  { id: 'c8', name: 'Γυμναστήριο', emoji: '🏋️‍♂️', isDefault: true },
-  { id: 'c9', name: 'Gaming', emoji: '🎮', isDefault: true },
-  { id: 'c10', name: 'Ταξίδια', emoji: '✈️', isDefault: true },
-  { id: 'c11', name: 'Ρούχα', emoji: '👕', isDefault: true },
-  { id: 'c12', name: 'Φαρμακείο', emoji: '💊', isDefault: true },
-  { id: 'c13', name: 'Σπίτι', emoji: '🏠', isDefault: true },
-  { id: 'c14', name: 'Μετακινήσεις', emoji: '🚌', isDefault: true },
-  { id: 'c15', name: 'Taxi', emoji: '🚕', isDefault: true },
-  { id: 'c16', name: 'Συνδρομές', emoji: '📺', isDefault: true },
-  { id: 'c17', name: 'Εκπαίδευση', emoji: '📚', isDefault: true },
-  { id: 'c18', name: 'Υγεία', emoji: '🩺', isDefault: true },
-  { id: 'c19', name: 'Κατοικίδια', emoji: '🐾', isDefault: true },
-  { id: 'c20', name: 'Παιδιά', emoji: '🧸', isDefault: true },
-  { id: 'c21', name: 'Δώρα', emoji: '🎁', isDefault: true },
-  { id: 'c22', name: 'Ηλεκτρονικά', emoji: '💻', isDefault: true },
-  { id: 'c23', name: 'Ομορφιά', emoji: '💄', isDefault: true },
-  { id: 'c24', name: 'Καθαριστήριο', emoji: '🧺', isDefault: true },
-];
-
-const RANGE_OPTIONS: Range[] = ['day', 'week', 'month', 'year'];
-const NEW_CATEGORY_VALUE = '__new_category__';
-const NO_PROJECT_VALUE = '__no_project__';
-const ALL_CATEGORIES_VALUE = '__all_categories__';
-const ALL_PROJECTS_VALUE = '__all_projects__';
-const WITHOUT_PROJECT_VALUE = '__without_project__';
 
 type ExpenseDraft = {
   project: string;
@@ -80,58 +62,6 @@ type ExpenseDraft = {
   receiptFileId: string | null;
 };
 
-const PRESET_BACKGROUNDS = [
-  {
-    id: 'default',
-    preview: 'linear-gradient(135deg, #0f172a 0%, #050505 55%, #0b1220 100%)',
-    css: 'radial-gradient(circle at top left, rgba(10, 132, 255, 0.16), transparent 26%), radial-gradient(circle at top right, rgba(50, 215, 75, 0.12), transparent 22%), #050505',
-  },
-  {
-    id: 'aurora',
-    preview: 'linear-gradient(135deg, #07111f 0%, #10263f 45%, #07111f 100%)',
-    css: 'radial-gradient(circle at 20% 20%, rgba(90, 200, 250, 0.28), transparent 24%), radial-gradient(circle at 80% 10%, rgba(48, 209, 88, 0.22), transparent 20%), radial-gradient(circle at 50% 100%, rgba(0, 116, 232, 0.22), transparent 30%), #05070b',
-  },
-  {
-    id: 'sunset',
-    preview: 'linear-gradient(135deg, #1a0d0b 0%, #3c1c12 45%, #12090a 100%)',
-    css: 'radial-gradient(circle at top left, rgba(255, 159, 10, 0.28), transparent 24%), radial-gradient(circle at top right, rgba(255, 69, 58, 0.22), transparent 26%), #080506',
-  },
-  {
-    id: 'forest',
-    preview: 'linear-gradient(135deg, #08100d 0%, #10211b 45%, #070b09 100%)',
-    css: 'radial-gradient(circle at top left, rgba(48, 209, 88, 0.22), transparent 26%), radial-gradient(circle at bottom right, rgba(52, 199, 89, 0.16), transparent 24%), #050706',
-  },
-  {
-    id: 'neon',
-    preview: 'linear-gradient(135deg, #14061f 0%, #27134f 48%, #090313 100%)',
-    css: 'radial-gradient(circle at 20% 15%, rgba(191, 90, 242, 0.28), transparent 24%), radial-gradient(circle at 80% 22%, rgba(94, 92, 230, 0.22), transparent 24%), radial-gradient(circle at 50% 100%, rgba(90, 200, 250, 0.18), transparent 28%), #04040a',
-  },
-  {
-    id: 'rose',
-    preview: 'linear-gradient(135deg, #20080f 0%, #4f1526 46%, #12060a 100%)',
-    css: 'radial-gradient(circle at top left, rgba(255, 55, 95, 0.24), transparent 22%), radial-gradient(circle at top right, rgba(255, 100, 130, 0.18), transparent 24%), #090507',
-  },
-  {
-    id: 'lagoon',
-    preview: 'linear-gradient(135deg, #07141a 0%, #103949 46%, #071015 100%)',
-    css: 'radial-gradient(circle at 15% 18%, rgba(100, 210, 255, 0.24), transparent 24%), radial-gradient(circle at 85% 22%, rgba(48, 176, 199, 0.2), transparent 20%), radial-gradient(circle at 50% 100%, rgba(0, 116, 232, 0.16), transparent 28%), #04080a',
-  },
-] as const;
-
-function getBackgroundCss(background: StoredBackground) {
-  return PRESET_BACKGROUNDS.find((item) => item.id === background.value)?.css ?? PRESET_BACKGROUNDS[0].css;
-}
-
-function normalizeAmount(value: string) {
-  const normalized = value.replace(/[^0-9.,]/g, '').replace(/,/g, '.');
-  const parts = normalized.split('.');
-  return parts.length <= 1 ? normalized : `${parts[0]}.${parts.slice(1).join('').slice(0, 2)}`;
-}
-
-function extractFirstEmoji(value: string) {
-  const match = value.match(/\p{Extended_Pictographic}(?:\uFE0F|\uFE0E)?/u);
-  return match?.[0] ?? '';
-}
 
 const compressImage = (file: File): Promise<Blob | File> => {
   return new Promise((resolve) => {
@@ -168,122 +98,6 @@ const compressImage = (file: File): Promise<Blob | File> => {
     reader.onerror = () => resolve(file);
   });
 };
-
-function polarToCartesian(cx: number, cy: number, radius: number, angleDeg: number) {
-  const rad = (angleDeg * Math.PI) / 180;
-  return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
-}
-
-function donutArcPath(cx: number, cy: number, innerR: number, outerR: number, startDeg: number, endDeg: number) {
-  const startOuter = polarToCartesian(cx, cy, outerR, startDeg);
-  const endOuter = polarToCartesian(cx, cy, outerR, endDeg);
-  const startInner = polarToCartesian(cx, cy, innerR, startDeg);
-  const endInner = polarToCartesian(cx, cy, innerR, endDeg);
-  const largeArc = endDeg - startDeg > 180 ? 1 : 0;
-
-  return [
-    `M ${startOuter.x} ${startOuter.y}`,
-    `A ${outerR} ${outerR} 0 ${largeArc} 1 ${endOuter.x} ${endOuter.y}`,
-    `L ${endInner.x} ${endInner.y}`,
-    `A ${innerR} ${innerR} 0 ${largeArc} 0 ${startInner.x} ${startInner.y}`,
-    'Z',
-  ].join(' ');
-}
-
-/** Πρόταση: Διαχωρισμός του Header σε αυτόνομο Component **/
-function Header({ locale, user, onSignOut }: { 
-  locale: Locale, user: User, onSignOut: () => void 
-}) {
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Κλείσιμο του dropdown όταν κάνουμε κλικ εκτός αυτού
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  return (
-    <header className="topbar" style={{ marginBottom: '16px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-        <div>
-          <h1>{t(locale, 'appTitle')}</h1>
-        </div>
-        
-        <div className="profile-menu-container" ref={dropdownRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-          <button 
-            className="avatar-trigger"
-            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-          >
-            {user.user_metadata?.avatar_url ? (
-              <img 
-                src={user.user_metadata.avatar_url} 
-                alt="Profile" 
-                style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.2)' }}
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#2c2c2e', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '14px', fontWeight: 'bold', border: '2px solid rgba(255,255,255,0.1)' }}>
-                {user.email?.charAt(0).toUpperCase()}
-              </div>
-            )}
-          </button>
-
-          {isDropdownOpen && (
-            <div className="profile-dropdown" style={{
-              position: 'absolute',
-              top: 'calc(100% + 10px)',
-              right: 0,
-              backgroundColor: '#1c1c1e',
-              border: '1px solid #2c2c2e',
-              borderRadius: '14px',
-              padding: '8px',
-              minWidth: '180px',
-              boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
-              zIndex: 1000
-            }}>
-              <div style={{ padding: '10px 12px', borderBottom: '1px solid #2c2c2e', marginBottom: '6px' }}>
-                <p style={{ margin: 0, fontSize: '11px', color: '#8e8e93', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{t(locale, 'signedInAs')}</p>
-                <p style={{ margin: '2px 0 0 0', fontSize: '13px', fontWeight: '500', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</p>
-              </div>
-              <button 
-                className="dropdown-item signout-btn" 
-                onClick={() => {
-                  setIsDropdownOpen(false);
-                  onSignOut();
-                }}
-                style={{ 
-                  width: '100%', 
-                  textAlign: 'left', 
-                  padding: '10px 12px', 
-                  backgroundColor: 'transparent', 
-                  border: 'none', 
-                  color: '#ff453a', 
-                  fontSize: '14px', 
-                  fontWeight: '600', 
-                  cursor: 'pointer',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}
-              >
-                <span style={{ fontSize: '16px' }}>🚪</span> {t(locale, 'signOut')}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </header>
-  );
-}
 
 export default function App() {
   const [locale, setLocale] = useState<Locale>(() => loadLocale());
@@ -332,6 +146,8 @@ export default function App() {
   const [editingProjectName, setEditingProjectName] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
+  const stickyShellRef = useRef<HTMLDivElement | null>(null);
+  const [stickyShellHeight, setStickyShellHeight] = useState(0);
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -375,6 +191,28 @@ export default function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    const element = stickyShellRef.current;
+    if (!element) return;
+
+    const updateHeight = () => {
+      setStickyShellHeight(Math.round(element.getBoundingClientRect().height));
+    };
+
+    updateHeight();
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(updateHeight);
+      resizeObserver.observe(element);
+    }
+    window.addEventListener('resize', updateHeight);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, [tab]);
 
   // Cloud Sync Logic: Φόρτωση δεδομένων από το Supabase μετά το Login
   useEffect(() => {
@@ -566,128 +404,7 @@ export default function App() {
       return expenseUtc >= weekStartUtc && expenseUtc < weekEndUtcExclusive;
     });
   }, [filteredExpenses, range]);
-  const budgetPaceView = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayIso = toLocalIsoDate(today);
-    const daysInCurrentMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-    const dailyTarget = daysInCurrentMonth > 0 ? parsedIncome / daysInCurrentMonth : 0;
-
-    if (range === 'year') {
-      return {
-        mode: 'disabled' as const,
-        actual: 0,
-        target: 0,
-        delta: 0,
-        paceTextKey: 'analyticsPaceYearDisabled',
-      };
-    }
-
-    if (range === 'day') {
-      const actualDay = metaFilteredExpenses.reduce((sum, expense) => {
-        if (expense.date !== todayIso) return sum;
-        return sum + (Number.parseFloat(expense.amount) || 0);
-      }, 0);
-      const targetDay = dailyTarget;
-      const delta = actualDay - targetDay;
-
-      return {
-        mode: 'day' as const,
-        actual: actualDay,
-        target: targetDay,
-        delta,
-        paceTextKey: delta > 0 ? 'analyticsPaceOverText' : 'analyticsPaceUnderText',
-      };
-    }
-
-    const periodStart = new Date(today);
-    const totalDays = range === 'week' ? 7 : daysInCurrentMonth;
-    if (range === 'week') {
-      const isoDow0Mon = (today.getDay() + 6) % 7;
-      periodStart.setDate(today.getDate() - isoDow0Mon);
-    } else {
-      periodStart.setDate(1);
-    }
-    periodStart.setHours(0, 0, 0, 0);
-
-    const dateToIndex = new Map<string, number>();
-    for (let i = 0; i < totalDays; i += 1) {
-      const date = new Date(periodStart);
-      date.setDate(periodStart.getDate() + i);
-      dateToIndex.set(toLocalIsoDate(date), i);
-    }
-
-    const dailySpend = Array.from({ length: totalDays }, () => 0);
-    metaFilteredExpenses.forEach((expense) => {
-      if (!expense.date) return;
-      const index = dateToIndex.get(expense.date);
-      if (index == null) return;
-      dailySpend[index] += Number.parseFloat(expense.amount) || 0;
-    });
-
-    const currentIndex = Math.max(
-      0,
-      Math.min(
-        totalDays - 1,
-        Math.floor((today.getTime() - periodStart.getTime()) / (24 * 60 * 60 * 1000))
-      )
-    );
-
-    const actualCum: number[] = [];
-    let running = 0;
-    for (let i = 0; i < totalDays; i += 1) {
-      if (i <= currentIndex) running += dailySpend[i];
-      actualCum.push(running);
-    }
-
-    const targetBudget = range === 'week' ? dailyTarget * 7 : parsedIncome;
-    const expectedCum = Array.from({ length: totalDays }, (_, i) => (targetBudget * (i + 1)) / totalDays);
-    const actualToDate = actualCum[currentIndex] ?? 0;
-    const expectedToDate = expectedCum[currentIndex] ?? 0;
-    const delta = actualToDate - expectedToDate;
-    const maxY = Math.max(targetBudget, actualCum[actualCum.length - 1] ?? 0, expectedCum[expectedCum.length - 1] ?? 0, 1);
-
-    const toCardPoints = (series: number[]) =>
-      series
-        .map((value, i) => {
-          const x = totalDays > 1 ? (i / (totalDays - 1)) * 100 : 0;
-          const y = 60 - (value / maxY) * 60;
-          return `${x.toFixed(2)},${y.toFixed(2)}`;
-        })
-        .join(' ');
-
-    const tickIndexes = range === 'week'
-      ? [0, 3, 6].filter((idx) => idx < totalDays)
-      : Array.from(new Set([0, 14, totalDays - 1])).sort((a, b) => a - b);
-    const tickLabels = tickIndexes.map((idx) => {
-      if (range === 'week') {
-        const date = new Date(periodStart);
-        date.setDate(periodStart.getDate() + idx);
-        return `${date.getDate()}/${date.getMonth() + 1}`;
-      }
-      return String(idx + 1);
-    });
-
-    return {
-      mode: 'chart' as const,
-      actual: actualToDate,
-      target: expectedToDate,
-      delta,
-      paceTextKey: delta > 0 ? 'analyticsPaceOverText' : 'analyticsPaceUnderText',
-      targetBudget,
-      periodSpendLabelKey: range === 'week' ? 'analyticsWeekSpendLabel' : 'analyticsMonthSpendLabel',
-      chart: {
-        totalDays,
-        currentIndex,
-        actualSeries: actualCum,
-        expectedSeries: expectedCum,
-        actualPoints: toCardPoints(actualCum.slice(0, currentIndex + 1)),
-        expectedPoints: toCardPoints(expectedCum),
-        tickIndexes,
-        tickLabels,
-      },
-    };
-  }, [metaFilteredExpenses, parsedIncome, range]);
+  const { budgetPaceView, budgetPaceModalChart } = useBudgetPace(metaFilteredExpenses, parsedIncome, range);
   const budgetPaceTarget = budgetPaceView.target;
   const budgetPaceActual = budgetPaceView.actual;
   const budgetPaceDelta = budgetPaceView.delta;
@@ -758,51 +475,6 @@ export default function App() {
       setActiveDonutSliceName(donutInteractiveSlices[0].name);
     }
   }, [donutInteractiveSlices, activeDonutSliceName]);
-  const budgetPaceModalChart = useMemo(() => {
-    if (budgetPaceView.mode !== 'chart') return null;
-
-    const width = 960;
-    const height = 460;
-    const margin = { top: 28, right: 28, bottom: 66, left: 58 };
-    const plotW = width - margin.left - margin.right;
-    const plotH = height - margin.top - margin.bottom;
-    const totalDays = budgetPaceView.chart.totalDays;
-    const maxY = Math.max(
-      budgetPaceView.targetBudget,
-      budgetPaceView.chart.actualSeries[budgetPaceView.chart.actualSeries.length - 1] ?? 0,
-      1
-    );
-
-    const toX = (index1Based: number) => margin.left + ((index1Based - 1) / Math.max(1, totalDays - 1)) * plotW;
-    const toY = (value: number) => margin.top + (1 - value / maxY) * plotH;
-    const toPoints = (series: number[]) => series.map((value, i) => `${toX(i + 1)},${toY(value)}`).join(' ');
-
-    const yTicksBase = budgetPaceView.targetBudget > 0
-      ? [0, budgetPaceView.targetBudget / 2, budgetPaceView.targetBudget]
-      : [0, maxY / 2, maxY];
-    const yTicks = Array.from(new Set(yTicksBase.map((value) => Math.round(value)))).sort((a, b) => b - a);
-    const xTicks = budgetPaceView.chart.tickIndexes.map((idx, i) => ({
-      index: idx + 1,
-      label: budgetPaceView.chart.tickLabels[i] ?? String(idx + 1),
-    }));
-    const todayIndex = budgetPaceView.chart.currentIndex + 1;
-
-    return {
-      width,
-      height,
-      margin,
-      xTicks,
-      yTicks,
-      actualPoints: toPoints(budgetPaceView.chart.actualSeries.slice(0, todayIndex)),
-      expectedPoints: toPoints(budgetPaceView.chart.expectedSeries),
-      todayX: toX(todayIndex),
-      actualEndX: toX(todayIndex),
-      actualEndY: toY(budgetPaceView.chart.actualSeries[todayIndex - 1] ?? 0),
-      actualEndLabelLeft: todayIndex / totalDays > 0.72,
-      toX,
-      toY,
-    };
-  }, [budgetPaceView]);
   useEffect(() => {
     if (analyticsModal === 'pace' && budgetPaceView.mode !== 'chart') {
       setAnalyticsModal(null);
@@ -1281,6 +953,7 @@ export default function App() {
   return (
     <div className="page-shell">
       <div
+        ref={stickyShellRef}
         className="sticky-shell"
         style={{ 
           position: 'sticky', 
@@ -1365,6 +1038,15 @@ export default function App() {
 
             {/* Filter Modal is now controlled by the Header button */}
           </>
+        )}
+
+        {tab === 'home' && (
+          <section
+            className="toolbar-row home-history-sticky"
+            style={{ top: `${stickyShellHeight}px` }}
+          >
+            <h3>{t(locale, 'history')}</h3>
+          </section>
         )}
 
         {tab === 'home' && (

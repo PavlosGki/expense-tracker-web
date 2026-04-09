@@ -711,6 +711,20 @@ button {
   margin: 0;
 }
 
+.home-history-sticky {
+  position: sticky;
+  z-index: 35;
+  margin: 0;
+  padding: 0 0 9px;
+  background: rgba(5, 5, 5, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.home-history-sticky h3 {
+  margin: 0;
+}
+
 .icon-btn {
   width: 40px;
   height: 40px;
