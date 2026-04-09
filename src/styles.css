@@ -255,12 +255,13 @@ button {
   gap: 12px;
   flex-wrap: nowrap;
   overflow-x: auto;
+  padding-top: 3px;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
 
 .analytics-top-gap {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .analytics-hero-grid::-webkit-scrollbar {

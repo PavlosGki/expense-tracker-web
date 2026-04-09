@@ -963,7 +963,7 @@ export default function App() {
           backdropFilter: 'blur(16px)', 
           WebkitBackdropFilter: 'blur(16px)', 
           margin: '-24px -16px 0 -16px', 
-          padding: '24px 16px 16px 16px', 
+          padding: tab === 'analytics' ? '24px 16px 10px 16px' : '24px 16px 16px 16px',
           borderBottom: 'none' 
         }}
       >
