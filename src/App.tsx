@@ -1120,7 +1120,7 @@ export default function App() {
 
         {tab === 'analytics' && (
           <>
-            <section className="analytics-hero-grid">
+            <section className="analytics-hero-grid analytics-top-gap">
               <article
                 className={`panel analytics-hero-card analytics-pace-card ${budgetPaceView.mode === 'chart' ? 'analytics-openable-card' : ''}`}
                 role={budgetPaceView.mode === 'chart' ? 'button' : undefined}
@@ -1235,19 +1235,23 @@ export default function App() {
                         {rows.length === 0 ? (
                           <p className="empty-line">{t(locale, 'noExpenses')}</p>
                         ) : (
-                          rows.map((row) => (
-                            <div key={`${group.id}_${row.name}`} className="bar-row">
-                              <div className="bar-label">
-                                <span>{row.emoji}</span>
-                                <strong>{row.name}</strong>
-                              </div>
-                              <div className="bar-track">
-                                <div className="bar-fill" style={{ width: `${maxAmount > 0 ? Math.max(18, (row.amount / maxAmount) * 100) : 18}%` }}>
-                                  {row.amount.toFixed(0)} €
+                          rows.map((row) => {
+                            const fillPct = maxAmount > 0 ? Math.max(18, (row.amount / maxAmount) * 100) : 18;
+                            const isTightBar = fillPct <= 30;
+                            return (
+                              <div key={`${group.id}_${row.name}`} className="bar-row">
+                                <div className="bar-label">
+                                  <span>{row.emoji}</span>
+                                  <strong>{row.name}</strong>
+                                </div>
+                                <div className="bar-track">
+                                  <div className={`bar-fill ${isTightBar ? 'tight' : ''}`} style={{ width: `${fillPct}%` }}>
+                                    {row.amount.toFixed(0)} €
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     )}
