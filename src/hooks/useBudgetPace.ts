@@ -35,6 +35,8 @@ type BudgetPaceViewChart = {
     expectedPoints: string;
     tickIndexes: number[];
     tickLabels: string[];
+    actualEndX: number;
+    actualEndY: number;
   };
 };
 
@@ -138,11 +140,14 @@ export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: num
     const delta = actualToDate - expectedToDate;
     const maxY = Math.max(targetBudget, actualCum[actualCum.length - 1] ?? 0, expectedCum[expectedCum.length - 1] ?? 0, 1);
 
+    const actualEndX = totalDays > 1 ? (currentIndex / (totalDays - 1)) * 100 : 0;
+    const actualEndY = 58 - (actualToDate / maxY) * 56;
+
     const toCardPoints = (series: number[]) =>
       series
         .map((value, i) => {
           const x = totalDays > 1 ? (i / (totalDays - 1)) * 100 : 0;
-          const y = 60 - (value / maxY) * 60;
+          const y = 58 - (value / maxY) * 56;
           return `${x.toFixed(2)},${y.toFixed(2)}`;
         })
         .join(' ');
@@ -176,6 +181,8 @@ export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: num
         expectedPoints: toCardPoints(expectedCum),
         tickIndexes,
         tickLabels,
+        actualEndX,
+        actualEndY,
       },
     };
   }, [metaFilteredExpenses, parsedIncome, range]);

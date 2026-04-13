@@ -197,7 +197,7 @@ export default function App() {
     if (!element) return;
 
     const updateHeight = () => {
-      setStickyShellHeight(Math.round(element.getBoundingClientRect().height));
+      setStickyShellHeight(element.getBoundingClientRect().height);
     };
 
     updateHeight();
@@ -212,7 +212,7 @@ export default function App() {
       resizeObserver?.disconnect();
       window.removeEventListener('resize', updateHeight);
     };
-  }, [tab]);
+  }, [tab, authLoading, session]);
 
   // Cloud Sync Logic: Φόρτωση δεδομένων από το Supabase μετά το Login
   useEffect(() => {
@@ -408,6 +408,10 @@ export default function App() {
   const budgetPaceTarget = budgetPaceView.target;
   const budgetPaceActual = budgetPaceView.actual;
   const budgetPaceDelta = budgetPaceView.delta;
+  const budgetPaceDayMax = Math.max(budgetPaceActual, budgetPaceTarget, 1);
+  const budgetPaceDayActualPct = (budgetPaceActual / budgetPaceDayMax) * 100;
+  const budgetPaceDayTargetPct = (budgetPaceTarget / budgetPaceDayMax) * 100;
+  const budgetPaceDayIsOver = budgetPaceActual > budgetPaceTarget;
   const categoryDonut = useMemo(() => {
     const aggregate: Record<string, { amount: number; emoji: string }> = {};
     donutPeriodExpenses.forEach((expense) => {
@@ -568,6 +572,7 @@ export default function App() {
 
     closeExpenseModal();
   };
+
 
   const handleExpenseTouchStart = (id: string, clientX: number) => {
     swipeStartRef.current = { id, x: clientX };
@@ -959,7 +964,7 @@ export default function App() {
           position: 'sticky', 
           top: 0, 
           zIndex: 40, 
-          backgroundColor: 'rgba(5, 5, 5, 0.85)', 
+          backgroundColor: 'rgba(5, 5, 5, 0.3)', 
           backdropFilter: 'blur(16px)', 
           WebkitBackdropFilter: 'blur(16px)', 
           margin: '-24px -16px 0 -16px', 
@@ -1043,7 +1048,13 @@ export default function App() {
         {tab === 'home' && (
           <section
             className="toolbar-row home-history-sticky"
-            style={{ top: `${stickyShellHeight}px` }}
+            style={{ 
+              top: `${stickyShellHeight}px`,
+              backgroundColor: 'rgba(5, 5, 5, 0.3)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              borderTop: 'none'
+            }}
           >
             <h3>{t(locale, 'history')}</h3>
           </section>
@@ -1148,6 +1159,12 @@ export default function App() {
                       <svg className="analytics-line-chart" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
                         <polyline className="analytics-line expected" points={budgetPaceView.chart.expectedPoints} />
                         <polyline className="analytics-line actual" points={budgetPaceView.chart.actualPoints} />
+                        <circle
+                          cx={budgetPaceView.chart.actualEndX}
+                          cy={budgetPaceView.chart.actualEndY}
+                          r="2"
+                          fill="#0a84ff"
+                        />
                       </svg>
                     </div>
                     <div className="analytics-line-legend">
@@ -1157,16 +1174,43 @@ export default function App() {
                   </>
                 )}
                 {budgetPaceView.mode === 'day' && (
-                  <div className="analytics-pace-day-metrics">
-                    <div className="analytics-pace-day-row">
-                      <span>{t(locale, 'analyticsActualLine')}</span>
-                      <strong>{budgetPaceActual.toFixed(2)}€</strong>
-                    </div>
-                    <div className="analytics-pace-day-row">
-                      <span>{t(locale, 'analyticsExpectedLine')}</span>
-                      <strong>{budgetPaceTarget.toFixed(2)}€</strong>
-                    </div>
-                  </div>
+              <div className="analytics-pace-day-metrics" style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                  <span style={{ color: '#8e8e93', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <i className="line-swatch" style={{ backgroundColor: '#0a84ff' }} />
+                    {t(locale, 'analyticsActualLine')}
+                  </span>
+                  <strong style={{ color: '#fff' }}>{budgetPaceActual.toFixed(2)}€</strong>
+                </div>
+
+                <div style={{ position: 'relative', height: '10px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '5px' }}>
+                  <div style={{
+                    position: 'absolute', top: 0, left: 0, height: '100%',
+                    width: `${budgetPaceDayActualPct}%`,
+                    minWidth: '6px',
+                    backgroundColor: '#0a84ff',
+                    borderRadius: '5px',
+                    transition: 'width 0.4s ease'
+                  }} />
+                  <div style={{
+                    position: 'absolute', top: '-4px', bottom: '-4px',
+                    left: `calc(${budgetPaceDayTargetPct}% - 1.5px)`,
+                    width: '3px',
+                    backgroundColor: '#fff',
+                    borderRadius: '2px',
+                    boxShadow: '0 0 4px rgba(0,0,0,0.5)',
+                    zIndex: 2
+                  }} />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                  <span style={{ color: '#8e8e93', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <i className="line-swatch" style={{ backgroundColor: '#fff', width: '3px', borderRadius: '1.5px' }} />
+                    {t(locale, 'analyticsExpectedLine')}
+                  </span>
+                  <strong style={{ color: '#fff' }}>{budgetPaceTarget.toFixed(2)}€</strong>
+                </div>
+              </div>
                 )}
                 {budgetPaceView.mode === 'disabled' && (
                   <p className="analytics-pace-note">{t(locale, 'analyticsPaceYearDisabled')}</p>
@@ -1608,19 +1652,20 @@ export default function App() {
                 transform={`translate(${budgetPaceModalChart.actualEndX + (budgetPaceModalChart.actualEndLabelLeft ? -12 : 12)}, ${budgetPaceModalChart.actualEndY - 14})`}
               >
                 <rect
-                  x={budgetPaceModalChart.actualEndLabelLeft ? -150 : 0}
+                  x={budgetPaceModalChart.actualEndLabelLeft ? -64 : 0}
                   y="-22"
-                  width="150"
+                  width="64"
                   height="24"
                   rx="7"
                   className="analytics-modal-actual-chip"
                 />
                 <text
-                  x={budgetPaceModalChart.actualEndLabelLeft ? -142 : 8}
+                  x={budgetPaceModalChart.actualEndLabelLeft ? -32 : 32}
                   y="-6"
+                  textAnchor="middle"
                   className="analytics-modal-actual-chip-text"
                 >
-                  {t(locale, budgetPaceView.periodSpendLabelKey)}: {budgetPaceActual.toFixed(0)}€
+                  {budgetPaceActual.toFixed(0)}€
                 </text>
               </g>
 
