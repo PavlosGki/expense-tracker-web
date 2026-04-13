@@ -141,6 +141,27 @@ button {
   backdrop-filter: blur(18px);
 }
 
+.budget-carousel {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  margin: 16px -16px 0;
+  padding: 0 16px 16px;
+}
+
+.budget-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+.budget-carousel .budget-panel {
+  flex: 0 0 100%;
+  scroll-snap-align: center;
+  margin-top: 0 !important;
+}
+
 .budget-panel h2,
 .budget-panel strong {
   font-size: 1.5rem;
@@ -211,6 +232,10 @@ button {
 
 .budget-fill {
   background: linear-gradient(90deg, #ff453a 0%, #ff9f0a 45%, #32d74b 100%);
+}
+
+.budget-panel.yearly .budget-fill {
+  background: linear-gradient(90deg, #ff453a 0%, #bf5af2 45%, #0a84ff 100%);
 }
 
 .budget-bar-value {
@@ -652,8 +677,8 @@ button {
 }
 
 .range-scroll-row .tab-chip.active {
-  background: rgba(0, 116, 232, 0.2);
-  border-color: rgba(0, 116, 232, 0.55);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #ffffff;
 }
 
@@ -698,8 +723,6 @@ button {
 .summary-card:focus-visible,
 .summary-card:active {
   outline: none;
-  background: inherit;
-  border-color: inherit;
   box-shadow: none;
 }
 
@@ -743,10 +766,26 @@ button {
   font-size: 0.9rem;
 }
 
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .list-panel,
 .settings-grid {
   display: grid;
   gap: 14px;
+}
+
+.list-panel,
+.summary-grid {
+  animation: fadeSlideUp 0.35s ease-out forwards;
 }
 
 .group-card {
@@ -1047,6 +1086,22 @@ button {
   font-size: 1.2rem;
 }
 
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalPop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1057,6 +1112,7 @@ button {
   place-items: center;
   padding: 18px;
   z-index: 1000;
+  animation: fadeIn 0.25s ease-out forwards;
 }
 
 .modal-card {
@@ -1066,6 +1122,23 @@ button {
   border-radius: 28px;
   padding: 18px;
   overflow: hidden;
+  animation: modalPop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fabPop {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.5) translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1) translateY(0);
+  }
+}
+
+.fab-button {
+  transform: translateX(-50%);
+  animation: fabPop 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .filter-modal {

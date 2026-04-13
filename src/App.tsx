@@ -107,6 +107,8 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>(() => loadProjects());
   const [income, setIncome] = useState(() => loadIncome());
   const [budgetInputValue, setBudgetInputValue] = useState(() => String(loadIncome()));
+  const [yearlyBudget, setYearlyBudget] = useState(() => Number(localStorage.getItem('expense_yearly_budget')) || 0);
+  const [yearlyBudgetInputValue, setYearlyBudgetInputValue] = useState(() => String(Number(localStorage.getItem('expense_yearly_budget')) || 0));
   const [range, setRange] = useState<Range>(() => loadRange());
   const [background, setBackground] = useState<StoredBackground>(() => loadBackground());
   const [fromDate, setFromDate] = useState<string>(() => loadFilter().fromIso ?? '');
@@ -147,6 +149,9 @@ export default function App() {
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
   const stickyShellRef = useRef<HTMLDivElement | null>(null);
+  const carouselRef = useRef<HTMLDivElement | null>(null);
+  const activeBudgetSlideRef = useRef(Number(localStorage.getItem('expense_active_budget_slide')) || 0);
+  const [activeBudgetSlide, setActiveBudgetSlide] = useState(activeBudgetSlideRef.current);
   const [stickyShellHeight, setStickyShellHeight] = useState(0);
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement | null>(null);
@@ -214,6 +219,15 @@ export default function App() {
     };
   }, [tab, authLoading, session]);
 
+  useEffect(() => {
+    if (tab === 'home' && carouselRef.current) {
+      const el = carouselRef.current;
+      requestAnimationFrame(() => {
+        el.scrollLeft = el.clientWidth * activeBudgetSlideRef.current;
+      });
+    }
+  }, [tab]);
+
   // Cloud Sync Logic: Φόρτωση δεδομένων από το Supabase μετά το Login
   useEffect(() => {
     async function syncCloudData() {
@@ -224,19 +238,28 @@ export default function App() {
 
       // 1. Φόρτωση Προφίλ (Income, Locale, κλπ)
       const { data: profile } = await supabase.from('profiles').select('*').maybeSingle();
+      const hasSyncedBefore = !!profile;
       
       if (profile) {
         const cloudIncome = Number(profile.income);
+        const cloudYearly = Number(profile.yearly_budget);
         
         // Robust Sync: Αν το cloud έχει 0 αλλά το τοπικό state έχει ήδη τιμή (από localStorage),
         // τότε προτιμούμε την τοπική τιμή και ενημερώνουμε το cloud.
         if (cloudIncome === 0 && income > 0) {
           await supabase.from('profiles').update({ 
             income, 
+            yearly_budget: yearlyBudget,
             updated_at: new Date().toISOString() 
           }).eq('id', user.id);
         } else {
           setIncome(cloudIncome);
+        }
+
+        if (cloudYearly === 0 && yearlyBudget > 0) {
+          // Handled by update above
+        } else if (cloudYearly !== undefined && !isNaN(cloudYearly)) {
+          setYearlyBudget(cloudYearly);
         }
         
         setLocale(profile.locale as Locale);
@@ -246,6 +269,7 @@ export default function App() {
         await supabase.from('profiles').insert({ 
           id: user.id, 
           income, 
+          yearly_budget: yearlyBudget,
           locale, 
           background,
           updated_at: new Date().toISOString()
@@ -254,34 +278,40 @@ export default function App() {
 
       // 2. Φόρτωση Εξόδων & Migration
       const { data: remoteExpenses } = await supabase.from('expenses').select('*').order('date', { ascending: false });
-      if (remoteExpenses && remoteExpenses.length > 0) {
-        setExpenses(remoteExpenses.map(({ user_id: _, receipt_file_id, ...e }) => ({
-          ...e,
-          amount: String(e.amount),
-          receiptFileId: receipt_file_id ?? e.receiptFileId ?? null
-        }) as Expense));
-      } else if (expenses.length > 0) {
-        // Migration: Αν η βάση είναι άδεια, ανέβασε τα τοπικά έξοδα
-        const toUpload = expenses.map(({ receiptFileId, ...e }) => ({ ...e, receipt_file_id: receiptFileId ?? null, user_id: user.id }));
-        await supabase.from('expenses').insert(toUpload);
+      if (remoteExpenses) {
+        if (remoteExpenses.length > 0 || hasSyncedBefore) {
+          setExpenses(remoteExpenses.map(({ user_id: _, receipt_file_id, ...e }) => ({
+            ...e,
+            amount: String(e.amount),
+            receiptFileId: receipt_file_id ?? e.receiptFileId ?? null
+          }) as Expense));
+        } else if (expenses.length > 0) {
+          // Migration: Αν η βάση είναι άδεια, ανέβασε τα τοπικά έξοδα
+          const toUpload = expenses.map(({ receiptFileId, ...e }) => ({ ...e, receipt_file_id: receiptFileId ?? null, user_id: user.id }));
+          await supabase.from('expenses').insert(toUpload);
+        }
       }
 
       // 3. Φόρτωση Κατηγοριών
       const { data: remoteCats } = await supabase.from('categories').select('*');
-      if (remoteCats && remoteCats.length > 0) {
-        setCustomCategories(remoteCats.map(({ user_id: _, ...c }) => c as Category));
-      } else if (customCategories.length > 0) {
-        const toUpload = customCategories.map(c => ({ ...c, user_id: user.id }));
-        await supabase.from('categories').insert(toUpload);
+      if (remoteCats) {
+        if (remoteCats.length > 0 || hasSyncedBefore) {
+          setCustomCategories(remoteCats.map(({ user_id: _, ...c }) => c as Category));
+        } else if (customCategories.length > 0) {
+          const toUpload = customCategories.map(c => ({ ...c, user_id: user.id }));
+          await supabase.from('categories').insert(toUpload);
+        }
       }
       
       // 4. Φόρτωση Projects
       const { data: remoteProjects } = await supabase.from('projects').select('*');
-      if (remoteProjects && remoteProjects.length > 0) {
-        setProjects(remoteProjects.map(({ user_id: _, ...p }) => p as Project));
-      } else if (projects.length > 0) {
-        const toUpload = projects.map(p => ({ ...p, user_id: user.id }));
-        await supabase.from('projects').insert(toUpload);
+      if (remoteProjects) {
+        if (remoteProjects.length > 0 || hasSyncedBefore) {
+          setProjects(remoteProjects.map(({ user_id: _, ...p }) => p as Project));
+        } else if (projects.length > 0) {
+          const toUpload = projects.map(p => ({ ...p, user_id: user.id }));
+          await supabase.from('projects').insert(toUpload);
+        }
       }
 
       // Σηματοδότηση ότι ο αρχικός συγχρονισμός ολοκληρώθηκε
@@ -297,6 +327,11 @@ export default function App() {
   useEffect(() => saveCategories(customCategories), [customCategories]);
   useEffect(() => saveProjects(projects), [projects]);
   useEffect(() => saveIncome(income), [income]);
+  
+  useEffect(() => {
+    localStorage.setItem('expense_yearly_budget', String(yearlyBudget));
+    setYearlyBudgetInputValue(String(yearlyBudget));
+  }, [yearlyBudget]);
 
   // Συγχρονισμός Locale & Background όταν αλλάζουν
   useEffect(() => {
@@ -304,6 +339,7 @@ export default function App() {
       supabase.from('profiles').upsert({ 
         id: user.id, 
         income, 
+        yearly_budget: yearlyBudget,
         locale, 
         background,
         updated_at: new Date().toISOString()
@@ -381,9 +417,11 @@ export default function App() {
     [metaFilteredExpenses, range, listBounds, locale]
   );
   const parsedIncome = Number(income) || 0;
+  const parsedYearly = Number(yearlyBudget) || 0;
   const currentMonthSpend = totals.month;
   const progressPct = parsedIncome > 0 ? Math.min(100, Math.max(0, (currentMonthSpend / parsedIncome) * 100)) : 0;
   const hasActiveFilter = Boolean(fromDate || toDate || categoryFilter || projectFilter);
+  const yearlyProgressPct = parsedYearly > 0 ? Math.min(100, Math.max(0, (totals.year / parsedYearly) * 100)) : 0;
   const donutPeriodExpenses = useMemo(() => {
     const todayIso = toLocalIsoDate(new Date());
     const todayMonthKey = todayIso.slice(0, 7);
@@ -404,7 +442,7 @@ export default function App() {
       return expenseUtc >= weekStartUtc && expenseUtc < weekEndUtcExclusive;
     });
   }, [filteredExpenses, range]);
-  const { budgetPaceView, budgetPaceModalChart } = useBudgetPace(metaFilteredExpenses, parsedIncome, range);
+  const { budgetPaceView, budgetPaceModalChart } = useBudgetPace(metaFilteredExpenses, parsedIncome, parsedYearly, range);
   const budgetPaceTarget = budgetPaceView.target;
   const budgetPaceActual = budgetPaceView.actual;
   const budgetPaceDelta = budgetPaceView.delta;
@@ -618,7 +656,18 @@ export default function App() {
     const projectToDelete = projects.find((project) => project.id === id);
     
     setProjects((prev) => prev.filter((project) => project.id !== id));
+
     if (user && supabase) {
+      if (projectToDelete) {
+        // 1. Καθαρίζουμε το project από τα έξοδα στο cloud ΠΡΙΝ διαγράψουμε το project
+        await supabase
+          .from('expenses')
+          .update({ project: null })
+          .eq('project', projectToDelete.name)
+          .eq('user_id', user.id);
+      }
+      
+      // 2. Διαγράφουμε το project
       await supabase.from('projects').delete().eq('id', id);
     }
 
@@ -700,6 +749,11 @@ export default function App() {
 
     if (user && supabase) {
       await supabase.from('categories').update({ name: trimmedName }).eq('id', id);
+      await supabase
+        .from('expenses')
+        .update({ category: trimmedName })
+        .eq('category', currentCategory.name)
+        .eq('user_id', user.id);
     }
 
     setCustomCategories((prev) => prev.map((category) => (category.id === id ? { ...category, name: trimmedName } : category)));
@@ -726,6 +780,11 @@ export default function App() {
 
     if (user && supabase) {
       await supabase.from('projects').update({ name: trimmedName }).eq('id', id);
+      await supabase
+        .from('expenses')
+        .update({ project: trimmedName })
+        .eq('project', currentProject.name)
+        .eq('user_id', user.id);
     }
 
     setProjects((prev) => prev.map((project) => (project.id === id ? { ...project, name: trimmedName } : project)));
@@ -889,11 +948,14 @@ export default function App() {
 
   const handleSaveBudget = async () => {
     const finalIncome = Number(budgetInputValue) || 0;
+    const finalYearly = Number(yearlyBudgetInputValue) || 0;
     setIncome(finalIncome);
+    setYearlyBudget(finalYearly);
     if (user && supabase) {
       const { error } = await supabase.from('profiles').upsert({ 
         id: user.id, 
         income: finalIncome, 
+        yearly_budget: finalYearly,
         locale, 
         background,
         updated_at: new Date().toISOString()
@@ -964,14 +1026,26 @@ export default function App() {
           position: 'sticky', 
           top: 0, 
           zIndex: 40, 
-          backgroundColor: 'rgba(5, 5, 5, 0.3)', 
-          backdropFilter: 'blur(16px)', 
-          WebkitBackdropFilter: 'blur(16px)', 
+          backgroundColor: 'transparent', 
           margin: '-24px -16px 0 -16px', 
-          padding: tab === 'analytics' ? '24px 16px 10px 16px' : '24px 16px 16px 16px',
+          padding: tab === 'home' ? '24px 16px 0 16px' : tab === 'analytics' ? '24px 16px 10px 16px' : '24px 16px 16px 16px',
           borderBottom: 'none' 
         }}
       >
+        {/* Camouflage Mask Layer */}
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: tab === 'home' ? '60px' : '0',
+          background: getBackgroundCss(background),
+          backgroundAttachment: 'fixed',
+          zIndex: -1,
+          pointerEvents: 'none',
+          maskImage: 'linear-gradient(to bottom, black calc(100% - 24px), transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, black calc(100% - 24px), transparent 100%)'
+        }} />
         <Header 
           locale={locale} 
           user={user} 
@@ -979,33 +1053,67 @@ export default function App() {
         />
         
         <nav className="tabbar">
-          <button 
-            className={`tab-chip ${hasActiveFilter ? 'active' : ''}`} 
-            onClick={() => setFilterModalOpen(true)}
-            title="Φίλτρα"
-            style={{ padding: '6px 12px', display: 'flex', alignItems: 'center' }}
-          >
-            <span style={{ fontSize: '15px' }}>🔍</span>
-          </button>
           {(['home', 'analytics', 'settings'] as const).map((id) => (
             <button key={id} className={`tab-chip ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>
               {t(locale, id)}
             </button>
           ))}
+          <button 
+            className={`tab-chip ${hasActiveFilter ? 'active' : ''}`} 
+            onClick={() => setFilterModalOpen(true)}
+            title="Φίλτρα"
+            style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', marginLeft: 'auto' }}
+          >
+            <span style={{ fontSize: '15px' }}>🔍</span>
+          </button>
         </nav>
 
         {tab === 'home' && (
-          <section className="panel budget-panel" style={{ marginTop: '16px' }}>
-            <h3 className="budget-title">{t(locale, 'monthlyBudget')}</h3>
-            <div className="budget-bar-wrap">
-              <strong className="budget-spent-value">{currentMonthSpend.toFixed(2)} €</strong>
-              <div className="progress-track budget-track">
-                <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - progressPct)}%` }} />
-              </div>
-              <strong className="budget-bar-value">{parsedIncome.toFixed(2)} €</strong>
+          <>
+            <div 
+              className="budget-carousel"
+              ref={carouselRef}
+              onScroll={(e) => {
+                const target = e.currentTarget;
+                if (target.clientWidth > 0) {
+                  const index = Math.round(target.scrollLeft / target.clientWidth);
+                  if (index !== activeBudgetSlideRef.current) {
+                    activeBudgetSlideRef.current = index;
+                    setActiveBudgetSlide(index);
+                    localStorage.setItem('expense_active_budget_slide', String(index));
+                  }
+                }
+              }}
+            >
+              <section className="panel budget-panel">
+                <h3 className="budget-title">{t(locale, 'monthlyBudget')}</h3>
+                <div className="budget-bar-wrap">
+                  <strong className="budget-spent-value">{currentMonthSpend.toFixed(2)} €</strong>
+                  <div className="progress-track budget-track">
+                    <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - progressPct)}%` }} />
+                  </div>
+                  <strong className="budget-bar-value">{parsedIncome.toFixed(2)} €</strong>
+                </div>
+                <p className="budget-consumed">{progressPct.toFixed(0)}% κατανάλωση</p>
+              </section>
+
+              <section className="panel budget-panel yearly">
+                <h3 className="budget-title">{t(locale, 'yearlyBudget')}</h3>
+                <div className="budget-bar-wrap">
+                  <strong className="budget-spent-value">{totals.year.toFixed(2)} €</strong>
+                  <div className="progress-track budget-track">
+                    <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - yearlyProgressPct)}%` }} />
+                  </div>
+                  <strong className="budget-bar-value">{parsedYearly.toFixed(2)} €</strong>
+                </div>
+                <p className="budget-consumed">{yearlyProgressPct.toFixed(0)}% κατανάλωση</p>
+              </section>
             </div>
-            <p className="budget-consumed">{progressPct.toFixed(0)}% κατανάλωση</p>
-          </section>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', paddingBottom: '4px', marginTop: '-8px' }}>
+              <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: activeBudgetSlide === 0 ? '#f5f5f7' : '#48484a', transition: 'background-color 0.3s ease' }} />
+              <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: activeBudgetSlide === 1 ? '#f5f5f7' : '#48484a', transition: 'background-color 0.3s ease' }} />
+            </div>
+          </>
         )}
 
         {showDashboard && tab === 'analytics' && (
@@ -1023,7 +1131,7 @@ export default function App() {
         )}
       </div>
 
-      <main className="main-grid">
+      <main className="main-grid" style={{ marginTop: tab === 'home' ? '4px' : undefined }}>
         {showDashboard && (
           <>
             {tab === 'home' && (
@@ -1043,21 +1151,6 @@ export default function App() {
 
             {/* Filter Modal is now controlled by the Header button */}
           </>
-        )}
-
-        {tab === 'home' && (
-          <section
-            className="toolbar-row home-history-sticky"
-            style={{ 
-              top: `${stickyShellHeight}px`,
-              backgroundColor: 'rgba(5, 5, 5, 0.3)',
-              backdropFilter: 'blur(16px)',
-              WebkitBackdropFilter: 'blur(16px)',
-              borderTop: 'none'
-            }}
-          >
-            <h3>{t(locale, 'history')}</h3>
-          </section>
         )}
 
         {tab === 'home' && (
@@ -1149,7 +1242,7 @@ export default function App() {
                 <p className="panel-label">{t(locale, 'analyticsBudgetPaceTitle')}</p>
                 <div className="analytics-kpi-compact">
                   <strong className={budgetPaceDelta > 0 ? 'danger' : 'success'}>
-                    {budgetPaceDelta >= 0 ? '+' : '-'}{Math.abs(budgetPaceDelta).toFixed(0)}€
+                    {Math.abs(budgetPaceDelta).toFixed(0)}€
                   </strong>
                   <small>{t(locale, budgetPaceView.paceTextKey)}</small>
                 </div>
@@ -1174,43 +1267,65 @@ export default function App() {
                   </>
                 )}
                 {budgetPaceView.mode === 'day' && (
-              <div className="analytics-pace-day-metrics" style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
-                  <span style={{ color: '#8e8e93', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <i className="line-swatch" style={{ backgroundColor: '#0a84ff' }} />
+              <>
+                <div className="analytics-line-wrap" style={{ padding: '0 4px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <div style={{ position: 'relative', width: '100%', height: '10px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '5px', margin: '24px 0' }}>
+                    
+                    <div style={{
+                      position: 'absolute',
+                      top: '-22px',
+                      left: `${budgetPaceDayActualPct}%`,
+                      transform: budgetPaceDayActualPct > 85 ? 'translateX(-100%)' : budgetPaceDayActualPct < 15 ? 'translateX(0)' : 'translateX(-50%)',
+                      color: '#fff',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      transition: 'left 0.4s ease, transform 0.4s ease'
+                    }}>
+                      {budgetPaceActual.toFixed(2)}€
+                    </div>
+
+                    <div style={{
+                      position: 'absolute',
+                      top: '16px',
+                      left: `${budgetPaceDayTargetPct}%`,
+                      transform: budgetPaceDayTargetPct > 85 ? 'translateX(-100%)' : budgetPaceDayTargetPct < 15 ? 'translateX(0)' : 'translateX(-50%)',
+                      color: '#8e8e93',
+                      fontSize: '11px',
+                      fontWeight: '600'
+                    }}>
+                      {budgetPaceTarget.toFixed(2)}€
+                    </div>
+
+                    <div style={{
+                      position: 'absolute', top: 0, left: 0, height: '100%',
+                      width: `${budgetPaceDayActualPct}%`,
+                      minWidth: '6px',
+                      backgroundColor: '#0a84ff',
+                      borderRadius: '5px',
+                      transition: 'width 0.4s ease'
+                    }} />
+                    <div style={{
+                      position: 'absolute', top: '-4px', bottom: '-4px',
+                      left: `calc(${budgetPaceDayTargetPct}% - 1.5px)`,
+                      width: '3px',
+                      backgroundColor: '#8e8e93',
+                      borderRadius: '2px',
+                      boxShadow: '0 0 4px rgba(0,0,0,0.5)',
+                      zIndex: 2
+                    }} />
+                  </div>
+                </div>
+                <div className="analytics-line-legend">
+                  <span>
+                    <div style={{ width: '10px', height: '10px', backgroundColor: '#0a84ff', borderRadius: '2px' }} />
                     {t(locale, 'analyticsActualLine')}
                   </span>
-                  <strong style={{ color: '#fff' }}>{budgetPaceActual.toFixed(2)}€</strong>
-                </div>
-
-                <div style={{ position: 'relative', height: '10px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '5px' }}>
-                  <div style={{
-                    position: 'absolute', top: 0, left: 0, height: '100%',
-                    width: `${budgetPaceDayActualPct}%`,
-                    minWidth: '6px',
-                    backgroundColor: '#0a84ff',
-                    borderRadius: '5px',
-                    transition: 'width 0.4s ease'
-                  }} />
-                  <div style={{
-                    position: 'absolute', top: '-4px', bottom: '-4px',
-                    left: `calc(${budgetPaceDayTargetPct}% - 1.5px)`,
-                    width: '3px',
-                    backgroundColor: '#fff',
-                    borderRadius: '2px',
-                    boxShadow: '0 0 4px rgba(0,0,0,0.5)',
-                    zIndex: 2
-                  }} />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
-                  <span style={{ color: '#8e8e93', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <i className="line-swatch" style={{ backgroundColor: '#fff', width: '3px', borderRadius: '1.5px' }} />
+                  <span>
+                    <div style={{ width: '2px', height: '12px', backgroundColor: '#8e8e93', borderRadius: '1px' }} />
                     {t(locale, 'analyticsExpectedLine')}
                   </span>
-                  <strong style={{ color: '#fff' }}>{budgetPaceTarget.toFixed(2)}€</strong>
                 </div>
-              </div>
+              </>
                 )}
                 {budgetPaceView.mode === 'disabled' && (
                   <p className="analytics-pace-note">{t(locale, 'analyticsPaceYearDisabled')}</p>
@@ -1310,28 +1425,50 @@ export default function App() {
           <section className="settings-grid">
             <section className="panel">
               <div className="settings-header" style={{ marginBottom: '16px' }}>
-                <h3>{t(locale, 'setBudget')}</h3>
+                <h3>{t(locale, 'budgetShort')}</h3>
               </div>
-              <div style={{ backgroundColor: '#000', borderRadius: '20px', padding: '24px', border: '1px solid #2c2c2e', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                  <input
-                    type="number"
-                    min="0"
-                    step="5"
-                    value={budgetInputValue}
-                    onChange={(event) => setBudgetInputValue(event.target.value)}
-                    onFocus={(event) => { if (event.target.value === '0') setBudgetInputValue(''); }}
-                    onBlur={() => { if (budgetInputValue === '') setBudgetInputValue('0'); }}
-                    style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '48px', fontWeight: '800', textAlign: 'center', maxWidth: '180px', outline: 'none', padding: 0 }}
-                  />
-                  <span style={{ fontSize: '32px', color: '#8e8e93', fontWeight: '600' }}>€</span>
-                </div>
-                {Number(budgetInputValue) !== income && (
-                  <button className="primary-btn" style={{ marginTop: '20px', width: '100%', borderRadius: '12px', padding: '14px', fontSize: '16px' }} onClick={handleSaveBudget}>
-                    {t(locale, 'save')}
-                  </button>
-                )}
+              
+              <div style={{ background: '#111214', border: '1px solid #2c2c2e', borderRadius: '16px', overflow: 'hidden' }}>
+                <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderBottom: '1px solid #2c2c2e', cursor: 'pointer' }}>
+                  <span style={{ fontSize: '15px', fontWeight: '500', color: '#f5f5f7' }}>{t(locale, 'monthlyBudget')}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="50"
+                      value={budgetInputValue}
+                      onChange={(event) => setBudgetInputValue(event.target.value)}
+                      onFocus={(event) => { if (event.target.value === '0') setBudgetInputValue(''); }}
+                      onBlur={() => { if (budgetInputValue === '') setBudgetInputValue('0'); }}
+                      style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '16px', fontWeight: '600', textAlign: 'right', width: '100px', outline: 'none', padding: 0 }}
+                    />
+                    <span style={{ fontSize: '16px', color: '#8e8e93', fontWeight: '500' }}>€</span>
+                  </div>
+                </label>
+
+                <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer' }}>
+                  <span style={{ fontSize: '15px', fontWeight: '500', color: '#f5f5f7' }}>{t(locale, 'yearlyBudget')}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="100"
+                      value={yearlyBudgetInputValue}
+                      onChange={(event) => setYearlyBudgetInputValue(event.target.value)}
+                      onFocus={(event) => { if (event.target.value === '0') setYearlyBudgetInputValue(''); }}
+                      onBlur={() => { if (yearlyBudgetInputValue === '') setYearlyBudgetInputValue('0'); }}
+                      style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '16px', fontWeight: '600', textAlign: 'right', width: '100px', outline: 'none', padding: 0 }}
+                    />
+                    <span style={{ fontSize: '16px', color: '#8e8e93', fontWeight: '500' }}>€</span>
+                  </div>
+                </label>
               </div>
+
+              {(Number(budgetInputValue) !== income || Number(yearlyBudgetInputValue) !== yearlyBudget) && (
+                <button className="primary-btn" style={{ marginTop: '14px', width: '100%', borderRadius: '14px', padding: '14px', fontSize: '16px' }} onClick={handleSaveBudget}>
+                  {t(locale, 'save')}
+                </button>
+              )}
             </section>
             <section className="panel">
               <div className="settings-header">
@@ -1555,12 +1692,12 @@ export default function App() {
       {/* Floating Action Button (FAB) for adding expenses */}
       {showDashboard && !isAnyModalOpen && (
         <button
+          className="fab-button"
           onClick={openAddExpense}
           style={{
             position: 'fixed',
             bottom: '40px',
             left: '50%',
-            transform: 'translateX(-50%)',
             width: '64px',
             height: '64px',
             borderRadius: '32px',
@@ -1593,7 +1730,7 @@ export default function App() {
             </div>
             <div className="analytics-kpi-compact">
               <strong className={budgetPaceDelta > 0 ? 'danger' : 'success'}>
-                {budgetPaceDelta >= 0 ? '+' : '-'}{Math.abs(budgetPaceDelta).toFixed(0)}€
+                {Math.abs(budgetPaceDelta).toFixed(0)}€
               </strong>
               <small>{budgetPaceDelta > 0 ? t(locale, 'analyticsPaceOverText') : t(locale, 'analyticsPaceUnderText')}</small>
             </div>

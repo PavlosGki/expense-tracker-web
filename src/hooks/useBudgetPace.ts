@@ -58,23 +58,15 @@ export type BudgetPaceModalChart = {
   toY: (value: number) => number;
 };
 
-export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: number, range: Range) {
+export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: number, parsedYearly: number, range: Range) {
   const budgetPaceView = useMemo<BudgetPaceView>(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayIso = toLocalIsoDate(today);
     const daysInCurrentMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const isLeapYear = new Date(today.getFullYear(), 1, 29).getMonth() === 1;
+    const daysInCurrentYear = isLeapYear ? 366 : 365;
     const dailyTarget = daysInCurrentMonth > 0 ? parsedIncome / daysInCurrentMonth : 0;
-
-    if (range === 'year') {
-      return {
-        mode: 'disabled',
-        actual: 0,
-        target: 0,
-        delta: 0,
-        paceTextKey: 'analyticsPaceYearDisabled',
-      };
-    }
 
     if (range === 'day') {
       const actualDay = metaFilteredExpenses.reduce((sum, expense) => {
@@ -94,12 +86,20 @@ export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: num
     }
 
     const periodStart = new Date(today);
-    const totalDays = range === 'week' ? 7 : daysInCurrentMonth;
+    let totalDays = daysInCurrentMonth;
+    let targetBudget = parsedIncome;
+
     if (range === 'week') {
+      totalDays = 7;
+      targetBudget = dailyTarget * 7;
       const isoDow0Mon = (today.getDay() + 6) % 7;
       periodStart.setDate(today.getDate() - isoDow0Mon);
-    } else {
+    } else if (range === 'month') {
       periodStart.setDate(1);
+    } else if (range === 'year') {
+      totalDays = daysInCurrentYear;
+      targetBudget = parsedYearly;
+      periodStart.setMonth(0, 1);
     }
     periodStart.setHours(0, 0, 0, 0);
 
@@ -133,7 +133,6 @@ export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: num
       actualCum.push(running);
     }
 
-    const targetBudget = range === 'week' ? dailyTarget * 7 : parsedIncome;
     const expectedCum = Array.from({ length: totalDays }, (_, i) => (targetBudget * (i + 1)) / totalDays);
     const actualToDate = actualCum[currentIndex] ?? 0;
     const expectedToDate = expectedCum[currentIndex] ?? 0;
@@ -154,13 +153,14 @@ export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: num
 
     const tickIndexes = range === 'week'
       ? [0, 3, 6].filter((idx) => idx < totalDays)
-      : Array.from(new Set([0, 14, totalDays - 1])).sort((a, b) => a - b);
+      : range === 'month'
+        ? Array.from(new Set([0, 14, totalDays - 1])).sort((a, b) => a - b)
+        : Array.from(new Set([0, 90, 181, 273, totalDays - 1])).sort((a, b) => a - b);
+        
     const tickLabels = tickIndexes.map((idx) => {
-      if (range === 'week') {
-        const date = new Date(periodStart);
-        date.setDate(periodStart.getDate() + idx);
-        return `${date.getDate()}/${date.getMonth() + 1}`;
-      }
+      const date = new Date(periodStart);
+      date.setDate(periodStart.getDate() + idx);
+      if (range === 'week' || range === 'year') return `${date.getDate()}/${date.getMonth() + 1}`;
       return String(idx + 1);
     });
 
@@ -171,7 +171,7 @@ export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: num
       delta,
       paceTextKey: delta > 0 ? 'analyticsPaceOverText' : 'analyticsPaceUnderText',
       targetBudget,
-      periodSpendLabelKey: range === 'week' ? 'analyticsWeekSpendLabel' : 'analyticsMonthSpendLabel',
+      periodSpendLabelKey: range === 'week' ? 'analyticsWeekSpendLabel' : range === 'year' ? 'analyticsYearSpendLabel' : 'analyticsMonthSpendLabel',
       chart: {
         totalDays,
         currentIndex,
