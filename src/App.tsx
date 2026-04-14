@@ -10,7 +10,7 @@ import {
   parseIsoDateToLocal,
   toLocalIsoDate,
 } from './lib/date';
-import { getLocalizedCategoryName, t, withDisplayName } from './lib/i18n';
+import { getLocalizedCategoryName, getLocalizedMonthAcc, t, withDisplayName } from './lib/i18n';
 import {
   loadBackground,
   loadCategories,
@@ -49,6 +49,7 @@ import {
   WITHOUT_PROJECT_VALUE,
 } from './config/appConstants';
 import { useBudgetPace } from './hooks/useBudgetPace';
+import { useAnalyticsInsight } from './hooks/useAnalyticsInsight';
 import './styles.css';
 import type { Category, Expense, Locale, Project, Range, TabId } from './types';
 
@@ -147,6 +148,14 @@ export default function App() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [showWrappedModal, setShowWrappedModal] = useState(false);
+  const [wrappedData, setWrappedData] = useState<{
+    monthKey: string;
+    monthName: string;
+    total: number;
+    saved: number;
+    topCategory: { name: string; emoji: string; amount: number } | null;
+  } | null>(null);
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
   const stickyShellRef = useRef<HTMLDivElement | null>(null);
   const carouselRef = useRef<HTMLDivElement | null>(null);
@@ -324,6 +333,45 @@ export default function App() {
     if (user) syncCloudData();
   }, [user]);
 
+  // Monthly Wrapped Logic (Μηνιαία Ανασκόπηση)
+  useEffect(() => {
+    if (!isInitialSyncDone || tab !== 'home') return;
+
+    const today = new Date();
+    // Παίρνουμε τον προηγούμενο μήνα ρυθμίζοντας την ημερομηνία στην 1η μέρα του τρέχοντος, και αφαιρώντας 1 μήνα
+    const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const prevMonthKey = toLocalIsoDate(prevMonthDate).slice(0, 7); // YYYY-MM
+
+    // Έλεγχος αν ο χρήστης έχει ήδη δει την ανασκόπηση για αυτόν τον μήνα
+    if (localStorage.getItem('expense_wrapped_seen') === prevMonthKey) return;
+
+    const prevMonthExpenses = expenses.filter((e) => e.date?.startsWith(prevMonthKey));
+    if (prevMonthExpenses.length === 0) return; // Δεν υπάρχουν έξοδα, άρα δεν βγάζουμε wrapped
+
+    const total = prevMonthExpenses.reduce((sum, e) => sum + (Number.parseFloat(e.amount) || 0), 0);
+    const saved = income - total;
+    
+    const catTotals: Record<string, { amount: number; emoji: string }> = {};
+    prevMonthExpenses.forEach((e) => {
+      const catName = getLocalizedCategoryName(locale, e.category || t(locale, 'other'));
+      if (!catTotals[catName]) catTotals[catName] = { amount: 0, emoji: e.emoji || '🏷️' };
+      catTotals[catName].amount += Number.parseFloat(e.amount) || 0;
+    });
+
+    const sortedCats = Object.entries(catTotals).sort((a, b) => b[1].amount - a[1].amount);
+    const topCategory = sortedCats.length > 0 ? { name: sortedCats[0][0], emoji: sortedCats[0][1].emoji, amount: sortedCats[0][1].amount } : null;
+    const monthName = getLocalizedMonthAcc(locale, prevMonthDate.getMonth());
+
+    setWrappedData({
+      monthKey: prevMonthKey,
+      monthName,
+      total,
+      saved,
+      topCategory
+    });
+    setShowWrappedModal(true);
+  }, [isInitialSyncDone, tab, expenses, income, locale]);
+
   // Το Local Storage πρέπει να ενημερώνεται ΠΑΝΤΑ, λειτουργώντας ως cache.
   useEffect(() => saveLocale(locale), [locale]);
   useEffect(() => saveExpenses(expenses), [expenses]);
@@ -470,6 +518,19 @@ export default function App() {
   const budgetPaceActual = budgetPaceView.actual;
   const budgetPaceDelta = budgetPaceView.delta;
   const budgetPaceDayMax = Math.max(budgetPaceActual, budgetPaceTarget, 1);
+  const insight = useAnalyticsInsight(
+    donutPeriodExpenses,
+    budgetPaceView,
+    range,
+    locale
+  );
+  const insightColors = {
+    blue: 'linear-gradient(135deg, #0a84ff 0%, #0074e8 100%)',
+    green: 'linear-gradient(135deg, #32d74b 0%, #30c157 100%)',
+    orange: 'linear-gradient(135deg, #ff9f0a 0%, #ff453a 100%)',
+    yellow: 'linear-gradient(135deg, #ffd60a 0%, #ffc700 100%)',
+  };
+
   const budgetPaceDayActualPct = (budgetPaceActual / budgetPaceDayMax) * 100;
   const budgetPaceDayTargetPct = (budgetPaceTarget / budgetPaceDayMax) * 100;
   const budgetPaceDayIsOver = budgetPaceActual > budgetPaceTarget;
@@ -1180,17 +1241,40 @@ export default function App() {
         )}
 
         {showDashboard && tab === 'analytics' && (
-          <section className="range-scroll-row">
-            {RANGE_OPTIONS.map((option) => (
-              <button
-                key={option}
-                className={`tab-chip ${range === option ? 'active' : ''}`}
-                onClick={() => setRange(option)}
+          <>
+            <section className="range-scroll-row">
+              {RANGE_OPTIONS.map((option) => (
+                <button
+                  key={option}
+                  className={`tab-chip ${range === option ? 'active' : ''}`}
+                  onClick={() => setRange(option)}
+                >
+                  {t(locale, option)}
+                </button>
+              ))}
+            </section>
+
+            {insight && (
+              <section 
+                style={{
+                  background: insightColors[insight.color],
+                  borderRadius: '12px',
+                  padding: '8px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                  animation: 'fadeSlideUp 0.35s ease-out forwards',
+                  marginTop: '10px'
+                }}
               >
-                {t(locale, option)}
-              </button>
-            ))}
-          </section>
+                <div style={{ fontSize: '18px', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }}>{insight.icon}</div>
+                <div style={{ fontSize: '13px', color: insight.color === 'yellow' ? 'rgba(0,0,0,0.8)' : '#fff', fontWeight: '600' }}>
+                  <span dangerouslySetInnerHTML={{ __html: insight.text }} />
+                </div>
+              </section>
+            )}
+          </>
         )}
       </div>
 
@@ -1799,6 +1883,52 @@ export default function App() {
         >
           <span style={{ marginTop: '-4px' }}>+</span>
         </button>
+      )}
+
+      {/* Monthly Wrapped Modal */}
+      {showWrappedModal && wrappedData && (
+        <div className="modal-backdrop" style={{ zIndex: 2000 }} onClick={() => {}}>
+          <div className="modal-card" style={{ maxWidth: '400px', textAlign: 'center', padding: '32px 24px', background: 'linear-gradient(180deg, #1c1c1e 0%, #0b0b0d 100%)', border: '1px solid #3a3b40', boxShadow: '0 24px 64px rgba(0,0,0,0.5)' }}>
+            <div style={{ fontSize: '56px', marginBottom: '16px', filter: 'drop-shadow(0 0 32px rgba(10, 132, 255, 0.4))' }}>🎇</div>
+            <h2 style={{ margin: '0 0 8px 0', fontSize: '24px' }}>{t(locale, 'wrappedTitle').replace('{month}', wrappedData.monthName)}</h2>
+            <p style={{ margin: '0 0 24px 0', color: '#8e8e93', fontSize: '15px' }}>{t(locale, 'wrappedSubtitle')}</p>
+
+            <div style={{ display: 'grid', gap: '12px', textAlign: 'left', marginBottom: '24px' }}>
+              <div style={{ background: '#111214', padding: '16px', borderRadius: '16px', border: '1px solid #2c2c2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#8e8e93' }}>{t(locale, 'wrappedTotal')}</span>
+                <strong style={{ fontSize: '18px' }}>{wrappedData.total.toFixed(2)}€</strong>
+              </div>
+
+              {income > 0 && (
+                <div style={{ background: '#111214', padding: '16px', borderRadius: '16px', border: '1px solid #2c2c2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#8e8e93' }}>{wrappedData.saved >= 0 ? t(locale, 'wrappedSaved') : t(locale, 'wrappedOver')}</span>
+                  <strong style={{ fontSize: '18px', color: wrappedData.saved >= 0 ? '#32d74b' : '#ff453a' }}>{Math.abs(wrappedData.saved).toFixed(2)}€</strong>
+                </div>
+              )}
+
+              {wrappedData.topCategory && (
+                <div style={{ background: '#111214', padding: '16px', borderRadius: '16px', border: '1px solid #2c2c2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#8e8e93' }}>{t(locale, 'wrappedTopCategory')}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>{wrappedData.topCategory.emoji}</span>
+                    <strong>{wrappedData.topCategory.name}</strong>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button 
+              className="primary-btn" 
+              style={{ width: '100%', padding: '16px', borderRadius: '16px', fontSize: '16px', fontWeight: 'bold' }}
+              onClick={() => {
+                localStorage.setItem('expense_wrapped_seen', wrappedData.monthKey);
+                setShowWrappedModal(false);
+              }}
+            >
+              {t(locale, 'wrappedBtn')}
+            </button>
+          </div>
+        </div>
       )}
 
       {analyticsModal === 'pace' && budgetPaceModalChart && budgetPaceView.mode === 'chart' && (
