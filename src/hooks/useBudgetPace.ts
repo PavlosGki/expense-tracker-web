@@ -126,26 +126,26 @@ export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: num
       )
     );
 
-    const actualCum: number[] = [];
+    const actualCum: number[] = [0];
     let running = 0;
     for (let i = 0; i < totalDays; i += 1) {
       if (i <= currentIndex) running += dailySpend[i];
       actualCum.push(running);
     }
 
-    const expectedCum = Array.from({ length: totalDays }, (_, i) => (targetBudget * (i + 1)) / totalDays);
-    const actualToDate = actualCum[currentIndex] ?? 0;
-    const expectedToDate = expectedCum[currentIndex] ?? 0;
+    const expectedCum = [0, ...Array.from({ length: totalDays }, (_, i) => (targetBudget * (i + 1)) / totalDays)];
+    const actualToDate = actualCum[currentIndex + 1] ?? 0;
+    const expectedToDate = expectedCum[currentIndex + 1] ?? 0;
     const delta = actualToDate - expectedToDate;
     const maxY = Math.max(targetBudget, actualCum[actualCum.length - 1] ?? 0, expectedCum[expectedCum.length - 1] ?? 0, 1);
 
-    const actualEndX = totalDays > 1 ? (currentIndex / (totalDays - 1)) * 100 : 0;
+    const actualEndX = totalDays > 0 ? ((currentIndex + 1) / totalDays) * 100 : 0;
     const actualEndY = 58 - (actualToDate / maxY) * 56;
 
     const toCardPoints = (series: number[]) =>
       series
         .map((value, i) => {
-          const x = totalDays > 1 ? (i / (totalDays - 1)) * 100 : 0;
+          const x = totalDays > 0 ? (i / totalDays) * 100 : 0;
           const y = 58 - (value / maxY) * 56;
           return `${x.toFixed(2)},${y.toFixed(2)}`;
         })
@@ -177,7 +177,7 @@ export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: num
         currentIndex,
         actualSeries: actualCum,
         expectedSeries: expectedCum,
-        actualPoints: toCardPoints(actualCum.slice(0, currentIndex + 1)),
+        actualPoints: toCardPoints(actualCum.slice(0, currentIndex + 2)),
         expectedPoints: toCardPoints(expectedCum),
         tickIndexes,
         tickLabels,
@@ -202,12 +202,12 @@ export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: num
       1
     );
 
-    const toX = (index1Based: number) => margin.left + ((index1Based - 1) / Math.max(1, totalDays - 1)) * plotW;
+    const toX = (dayIndex: number) => margin.left + (dayIndex / Math.max(1, totalDays)) * plotW;
     const toY = (value: number) => margin.top + (1 - value / maxY) * plotH;
-    const toPoints = (series: number[]) => series.map((value, i) => `${toX(i + 1)},${toY(value)}`).join(' ');
+    const toPoints = (series: number[]) => series.map((value, i) => `${toX(i)},${toY(value)}`).join(' ');
 
-    const yTicksBase = budgetPaceView.targetBudget > 0
-      ? [0, budgetPaceView.targetBudget / 2, budgetPaceView.targetBudget]
+    const yTicksBase = maxY > budgetPaceView.targetBudget
+      ? [0, budgetPaceView.targetBudget, maxY]
       : [0, maxY / 2, maxY];
     const yTicks = Array.from(new Set(yTicksBase.map((value) => Math.round(value)))).sort((a, b) => b - a);
     const xTicks = budgetPaceView.chart.tickIndexes.map((idx, i) => ({
@@ -222,11 +222,11 @@ export function useBudgetPace(metaFilteredExpenses: Expense[], parsedIncome: num
       margin,
       xTicks,
       yTicks,
-      actualPoints: toPoints(budgetPaceView.chart.actualSeries.slice(0, todayIndex)),
+      actualPoints: toPoints(budgetPaceView.chart.actualSeries.slice(0, todayIndex + 1)),
       expectedPoints: toPoints(budgetPaceView.chart.expectedSeries),
       todayX: toX(todayIndex),
       actualEndX: toX(todayIndex),
-      actualEndY: toY(budgetPaceView.chart.actualSeries[todayIndex - 1] ?? 0),
+      actualEndY: toY(budgetPaceView.chart.actualSeries[todayIndex] ?? 0),
       actualEndLabelLeft: todayIndex / totalDays > 0.72,
       toX,
       toY,

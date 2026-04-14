@@ -133,8 +133,8 @@ export default function App() {
   const [draft, setDraft] = useState<ExpenseDraft>({
     project: '',
     amount: '',
-    category: DEFAULT_CATEGORIES[0].name,
-    emoji: DEFAULT_CATEGORIES[0].emoji,
+    category: '',
+    emoji: '🏷️',
     date: toLocalIsoDate(new Date()),
     comment: '',
     receiptFileId: null,
@@ -152,6 +152,9 @@ export default function App() {
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const activeBudgetSlideRef = useRef(Number(localStorage.getItem('expense_active_budget_slide')) || 0);
   const [activeBudgetSlide, setActiveBudgetSlide] = useState(activeBudgetSlideRef.current);
+  const isDraggingRef = useRef(false);
+  const startXRef = useRef(0);
+  const scrollLeftRef = useRef(0);
   const [stickyShellHeight, setStickyShellHeight] = useState(0);
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement | null>(null);
@@ -392,6 +395,26 @@ export default function App() {
     [metaFilteredExpenses, filterFromDate, filterToDate]
   );
 
+  // Υπολογισμός των No-Spend Days για τον τρέχοντα μήνα
+  const noSpendDaysThisMonth = useMemo(() => {
+    const today = new Date();
+    const currentMonthPrefix = toLocalIsoDate(today).slice(0, 7); // "YYYY-MM"
+    const todayStr = toLocalIsoDate(today);
+
+    const daysWithExpenses = new Set<string>();
+    expenses.forEach((expense) => {
+      if (expense.date && expense.date.startsWith(currentMonthPrefix) && expense.date <= todayStr) {
+        const amount = Number.parseFloat(expense.amount.replace(',', '.'));
+        if (amount > 0) {
+          daysWithExpenses.add(expense.date);
+        }
+      }
+    });
+
+    const todayDateNum = today.getDate();
+    return Math.max(0, todayDateNum - daysWithExpenses.size);
+  }, [expenses]);
+
   // Υπολογισμός των ορίων ημερομηνίας για τις λίστες (Ιστορικό/Ανάλυση)
   // Αν δεν υπάρχει φίλτρο, χρησιμοποιούμε την παλαιότερη και τη νεότερη ημερομηνία από τα δεδομένα
   const listBounds = useMemo(() => {
@@ -533,8 +556,8 @@ export default function App() {
     setDraft({
       project: defaultProject,
       amount: '',
-      category: DEFAULT_CATEGORIES[0].name,
-      emoji: DEFAULT_CATEGORIES[0].emoji,
+      category: '',
+      emoji: '🏷️',
       date: toLocalIsoDate(new Date()),
       comment: '',
     receiptFileId: null,
@@ -582,6 +605,10 @@ export default function App() {
     }
 
     const categoryName = draft.category;
+    if (!categoryName) {
+      window.alert(t(locale, 'invalidCategory'));
+      return;
+    }
     const categoryEmoji = draft.emoji || '🏷️';
 
     const nextExpense: Expense = {
@@ -1073,6 +1100,36 @@ export default function App() {
             <div 
               className="budget-carousel"
               ref={carouselRef}
+              style={{ cursor: 'grab' }}
+              onMouseDown={(e) => {
+                if (!carouselRef.current) return;
+                isDraggingRef.current = true;
+                startXRef.current = e.pageX - carouselRef.current.offsetLeft;
+                scrollLeftRef.current = carouselRef.current.scrollLeft;
+                carouselRef.current.style.cursor = 'grabbing';
+                carouselRef.current.style.scrollSnapType = 'none';
+              }}
+              onMouseLeave={() => {
+                isDraggingRef.current = false;
+                if (carouselRef.current) {
+                  carouselRef.current.style.cursor = 'grab';
+                  carouselRef.current.style.scrollSnapType = 'x mandatory';
+                }
+              }}
+              onMouseUp={() => {
+                isDraggingRef.current = false;
+                if (carouselRef.current) {
+                  carouselRef.current.style.cursor = 'grab';
+                  carouselRef.current.style.scrollSnapType = 'x mandatory';
+                }
+              }}
+              onMouseMove={(e) => {
+                if (!isDraggingRef.current || !carouselRef.current) return;
+                e.preventDefault();
+                const x = e.pageX - carouselRef.current.offsetLeft;
+                const walk = (x - startXRef.current) * 1.5;
+                carouselRef.current.scrollLeft = scrollLeftRef.current - walk;
+              }}
               onScroll={(e) => {
                 const target = e.currentTarget;
                 if (target.clientWidth > 0) {
@@ -1109,9 +1166,15 @@ export default function App() {
                 <p className="budget-consumed">{yearlyProgressPct.toFixed(0)}% κατανάλωση</p>
               </section>
             </div>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', paddingBottom: '4px', marginTop: '-8px' }}>
-              <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: activeBudgetSlide === 0 ? '#f5f5f7' : '#48484a', transition: 'background-color 0.3s ease' }} />
-              <div style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: activeBudgetSlide === 1 ? '#f5f5f7' : '#48484a', transition: 'background-color 0.3s ease' }} />
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', paddingBottom: '4px', marginTop: '-8px' }}>
+              <div 
+                style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: activeBudgetSlide === 0 ? '#f5f5f7' : '#48484a', transition: 'background-color 0.3s ease', cursor: 'pointer' }} 
+                onClick={() => carouselRef.current?.scrollTo({ left: 0, behavior: 'smooth' })}
+              />
+              <div 
+                style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: activeBudgetSlide === 1 ? '#f5f5f7' : '#48484a', transition: 'background-color 0.3s ease', cursor: 'pointer' }} 
+                onClick={() => carouselRef.current?.scrollTo({ left: carouselRef.current?.clientWidth || 0, behavior: 'smooth' })}
+              />
             </div>
           </>
         )}
@@ -1134,6 +1197,31 @@ export default function App() {
       <main className="main-grid" style={{ marginTop: tab === 'home' ? '4px' : undefined }}>
         {showDashboard && (
           <>
+            {tab === 'home' && noSpendDaysThisMonth > 0 && (
+              <section 
+                style={{
+                  background: 'linear-gradient(135deg, #ff9f0a 0%, #ff453a 100%)',
+                  borderRadius: '12px',
+                  padding: '8px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  boxShadow: '0 4px 12px rgba(255, 69, 58, 0.2)',
+                  animation: 'fadeSlideUp 0.35s ease-out forwards'
+                }}
+              >
+                <div style={{ fontSize: '18px', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))' }}>🔥</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+                  <strong style={{ fontSize: '14px', color: '#fff', fontWeight: '800', letterSpacing: '0.2px' }}>
+                    {noSpendDaysThisMonth} {noSpendDaysThisMonth === 1 ? t(locale, 'noSpendDay') : t(locale, 'noSpendDays')}
+                  </strong>
+                  <span style={{ fontSize: '13px', color: 'rgba(255, 255, 255, 0.9)', fontWeight: '500' }}>
+                    {t(locale, 'noSpendSubtitle')}
+                  </span>
+                </div>
+              </section>
+            )}
+
             {tab === 'home' && (
               <section className="summary-grid">
                 {RANGE_OPTIONS.map((option) => (
@@ -1316,14 +1404,8 @@ export default function App() {
                   </div>
                 </div>
                 <div className="analytics-line-legend">
-                  <span>
-                    <div style={{ width: '10px', height: '10px', backgroundColor: '#0a84ff', borderRadius: '2px' }} />
-                    {t(locale, 'analyticsActualLine')}
-                  </span>
-                  <span>
-                    <div style={{ width: '2px', height: '12px', backgroundColor: '#8e8e93', borderRadius: '1px' }} />
-                    {t(locale, 'analyticsExpectedLine')}
-                  </span>
+                  <span><i className="line-swatch expected" />{t(locale, 'analyticsExpectedLine')}</span>
+                  <span><i className="line-swatch actual" />{t(locale, 'analyticsActualLine')}</span>
                 </div>
               </>
                 )}
@@ -1430,7 +1512,7 @@ export default function App() {
               
               <div style={{ background: '#111214', border: '1px solid #2c2c2e', borderRadius: '16px', overflow: 'hidden' }}>
                 <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderBottom: '1px solid #2c2c2e', cursor: 'pointer' }}>
-                  <span style={{ fontSize: '15px', fontWeight: '500', color: '#f5f5f7' }}>{t(locale, 'monthlyBudget')}</span>
+                  <span style={{ fontSize: '15px', fontWeight: '500', color: '#f5f5f7' }}>{t(locale, 'monthly')}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
                     <input
                       type="number"
@@ -1447,7 +1529,7 @@ export default function App() {
                 </label>
 
                 <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer' }}>
-                  <span style={{ fontSize: '15px', fontWeight: '500', color: '#f5f5f7' }}>{t(locale, 'yearlyBudget')}</span>
+                  <span style={{ fontSize: '15px', fontWeight: '500', color: '#f5f5f7' }}>{t(locale, 'yearly')}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
                     <input
                       type="number"
@@ -1838,7 +1920,9 @@ export default function App() {
             <div className="analytics-modal-meta">
               <span><i className="line-swatch expected" />{t(locale, 'analyticsExpectedLine')}</span>
               <span><i className="line-swatch actual" />{t(locale, 'analyticsActualLine')}</span>
-              <span>{t(locale, 'analyticsBudgetLabel')}: {parsedIncome.toFixed(0)}€</span>
+              <span>
+                {range === 'year' ? t(locale, 'analyticsYearlyBudget') : range === 'week' ? t(locale, 'analyticsWeeklyBudget') : t(locale, 'analyticsBudgetLabel')}: {budgetPaceView.targetBudget.toFixed(0)}€
+              </span>
             </div>
           </div>
         </div>
@@ -1939,54 +2023,66 @@ export default function App() {
             <div className="filter-fields">
               <label>
                 <span>{t(locale, 'from')}</span>
-                <input 
-                  type={fromDate ? "date" : "text"} 
-                  placeholder="dd-mm-yyyy"
-                  onFocus={(e) => e.target.type = 'date'}
-                  onBlur={(e) => { if (!e.target.value) e.target.type = 'text'; }}
-                  value={fromDate} 
-                  onChange={(event) => setFromDate(event.target.value)} 
-                />
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                  <input 
+                    type={fromDate ? "date" : "text"} 
+                    placeholder="dd-mm-yyyy"
+                    onFocus={(e) => e.target.type = 'date'}
+                    onBlur={(e) => { if (!e.target.value) e.target.type = 'text'; }}
+                    value={fromDate} 
+                    onChange={(event) => setFromDate(event.target.value)} 
+                  />
+                </div>
               </label>
               <label>
                 <span>{t(locale, 'to')}</span>
-                <input 
-                  type={toDate ? "date" : "text"} 
-                  placeholder="dd-mm-yyyy"
-                  onFocus={(e) => e.target.type = 'date'}
-                  onBlur={(e) => { if (!e.target.value) e.target.type = 'text'; }}
-                  value={toDate} 
-                  onChange={(event) => setToDate(event.target.value)} 
-                />
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                  <input 
+                    type={toDate ? "date" : "text"} 
+                    placeholder="dd-mm-yyyy"
+                    onFocus={(e) => e.target.type = 'date'}
+                    onBlur={(e) => { if (!e.target.value) e.target.type = 'text'; }}
+                    value={toDate} 
+                    onChange={(event) => setToDate(event.target.value)} 
+                  />
+                </div>
               </label>
               <label>
                 <span>{t(locale, 'project')}</span>
-                <select
-                  value={projectFilter || ALL_PROJECTS_VALUE}
-                  onChange={(event) => setProjectFilter(event.target.value === ALL_PROJECTS_VALUE ? '' : event.target.value)}
-                >
-                  <option value={ALL_PROJECTS_VALUE}>{t(locale, 'allProjects')}</option>
-                  <option value={WITHOUT_PROJECT_VALUE}>{t(locale, 'withoutProject')}</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.name}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-              </label>
-              <label>
-                <span>{t(locale, 'category')}</span>
-                <select
-                  value={categoryFilter || ALL_CATEGORIES_VALUE}
-                  onChange={(event) => setCategoryFilter(event.target.value === ALL_CATEGORIES_VALUE ? '' : event.target.value)}
-                >
-                  <option value={ALL_CATEGORIES_VALUE}>{t(locale, 'allCategories')}</option>
-                  {displayCategories.map((category) => (
-                    <option key={category.id} value={category.name}>
-                      {category.emoji} {category.displayName}
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+                  <select
+                    value={projectFilter || ALL_PROJECTS_VALUE}
+                    onChange={(event) => setProjectFilter(event.target.value === ALL_PROJECTS_VALUE ? '' : event.target.value)}
+                  >
+                  <option value={ALL_PROJECTS_VALUE}></option>
+                    <option value={WITHOUT_PROJECT_VALUE}>{t(locale, 'withoutProject')}</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.name}>
+                      {project.name}
                     </option>
                   ))}
                 </select>
+                </div>
+              </label>
+              <label>
+                <span>{t(locale, 'category')}</span>
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></svg>
+                  <select
+                    value={categoryFilter || ALL_CATEGORIES_VALUE}
+                    onChange={(event) => setCategoryFilter(event.target.value === ALL_CATEGORIES_VALUE ? '' : event.target.value)}
+                  >
+                  <option value={ALL_CATEGORIES_VALUE}></option>
+                    {displayCategories.map((category) => (
+                      <option key={category.id} value={category.name}>
+                        {category.emoji} {category.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </label>
             </div>
             <div className="modal-actions">
@@ -2038,64 +2134,79 @@ export default function App() {
 
             <label>
               <span>{t(locale, 'project')}</span>
-              <select
-                value={draft.project || NO_PROJECT_VALUE}
-                onChange={(event) => setDraft((prev) => ({ ...prev, project: event.target.value === NO_PROJECT_VALUE ? '' : event.target.value }))}
-              >
-                <option value={NO_PROJECT_VALUE}>{t(locale, 'noProject')}</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.name}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
+              <div className="input-icon-wrap">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+                <select
+                  value={draft.project || NO_PROJECT_VALUE}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, project: event.target.value === NO_PROJECT_VALUE ? '' : event.target.value }))}
+                >
+                <option value={NO_PROJECT_VALUE}></option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.name}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </label>
 
             <label>
               <span>{t(locale, 'category')}</span>
-              <select
-                value={draft.category}
-                onChange={(event) => {
-                  if (event.target.value === NEW_CATEGORY_VALUE) {
-                    openCategoryModal(true);
-                    return;
-                  }
-                  const category = allCategories.find((item) => item.name === event.target.value);
-                  setDraft((prev) => ({
-                    ...prev,
-                    category: event.target.value,
-                    emoji: category?.emoji ?? prev.emoji,
-                  }));
-                }}
-              >
-                {displayCategories.map((category) => (
-                  <option key={category.id} value={category.name}>
-                    {category.emoji} {category.displayName}
-                  </option>
-                ))}
-                <option value={NEW_CATEGORY_VALUE}>{t(locale, 'newCategoryOption')}</option>
-              </select>
+              <div className="input-icon-wrap">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></svg>
+                <select
+                  value={draft.category}
+                  onChange={(event) => {
+                    if (event.target.value === NEW_CATEGORY_VALUE) {
+                      openCategoryModal(true);
+                      return;
+                    }
+                    const category = allCategories.find((item) => item.name === event.target.value);
+                    setDraft((prev) => ({
+                      ...prev,
+                      category: event.target.value,
+                      emoji: category?.emoji ?? prev.emoji,
+                    }));
+                  }}
+                >
+              <option value="" disabled hidden></option>
+                  {displayCategories.map((category) => (
+                    <option key={category.id} value={category.name}>
+                      {category.emoji} {category.displayName}
+                    </option>
+                  ))}
+                  <option value={NEW_CATEGORY_VALUE}>{t(locale, 'newCategoryOption')}</option>
+                </select>
+              </div>
             </label>
 
             <div className="grid-two">
               <label>
                 <span>{t(locale, 'amount')}</span>
-                <input value={draft.amount} inputMode="decimal" onChange={(event) => setDraft((prev) => ({ ...prev, amount: normalizeAmount(event.target.value) }))} />
+                <div className="input-icon-wrap">
+              <span className="input-icon-text" style={{ fontSize: '18px', fontWeight: '500' }}>€</span>
+                  <input value={draft.amount} inputMode="decimal" onChange={(event) => setDraft((prev) => ({ ...prev, amount: normalizeAmount(event.target.value) }))} />
+                </div>
               </label>
             </div>
 
             <label>
               <span>{t(locale, 'date')}</span>
-              <input type="date" value={draft.date} onChange={(event) => setDraft((prev) => ({ ...prev, date: event.target.value }))} />
+              <div className="input-icon-wrap">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                <input type="date" value={draft.date} onChange={(event) => setDraft((prev) => ({ ...prev, date: event.target.value }))} />
+              </div>
             </label>
 
             <label>
               <span>{t(locale, 'comment')}</span>
-              <input
-                value={draft.comment}
-                onChange={(event) => setDraft((prev) => ({ ...prev, comment: event.target.value }))}
-                placeholder={t(locale, 'commentPlaceholder')}
-              />
+              <div className="input-icon-wrap">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+                <input
+                  value={draft.comment}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, comment: event.target.value }))}
+                />
+              </div>
             </label>
 
             <label>
@@ -2162,12 +2273,15 @@ export default function App() {
             <h3>{t(locale, 'addProject')}</h3>
             <label>
               <span>{t(locale, 'projectName')}</span>
-              <input
-                value={newProjectName}
-                onChange={(event) => setNewProjectName(event.target.value)}
-                onKeyDown={(event) => handleManageInputKeyDown(event, handleAddProject)}
-                autoFocus
-              />
+              <div className="input-icon-wrap">
+                <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+                <input
+                  value={newProjectName}
+                  onChange={(event) => setNewProjectName(event.target.value)}
+                  onKeyDown={(event) => handleManageInputKeyDown(event, handleAddProject)}
+                  autoFocus
+                />
+              </div>
             </label>
             <div className="modal-actions">
               <button type="button" className="ghost-btn" onClick={() => setProjectModalOpen(false)}>
@@ -2203,13 +2317,16 @@ export default function App() {
               </label>
               <label className="category-create-name">
                 <span>{t(locale, 'categoryName')}</span>
-                <input
-                  className="category-name-input"
-                  value={newCategoryName}
-                  onChange={(event) => setNewCategoryName(event.target.value)}
-                  onKeyDown={(event) => handleManageInputKeyDown(event, handleAddCategory)}
-                  autoFocus
-                />
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></svg>
+                  <input
+                    className="category-name-input"
+                    value={newCategoryName}
+                    onChange={(event) => setNewCategoryName(event.target.value)}
+                    onKeyDown={(event) => handleManageInputKeyDown(event, handleAddCategory)}
+                    autoFocus
+                  />
+                </div>
               </label>
             </div>
             <div className="modal-actions">
