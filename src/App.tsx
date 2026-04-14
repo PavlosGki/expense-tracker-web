@@ -148,6 +148,8 @@ export default function App() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [fabMenuOpen, setFabMenuOpen] = useState(false);
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [showWrappedModal, setShowWrappedModal] = useState(false);
   const [wrappedData, setWrappedData] = useState<{
     monthKey: string;
@@ -607,7 +609,32 @@ export default function App() {
     }
   }, [analyticsModal, budgetPaceView.mode]);
 
-  const openAddExpense = () => {
+  const topCategories = useMemo(() => {
+    const frequency: Record<string, number> = {};
+    expenses.forEach(e => {
+      if (e.category) {
+        frequency[e.category] = (frequency[e.category] || 0) + 1;
+      }
+    });
+    const sorted = Object.entries(frequency)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name]) => name);
+    
+    const result: Category[] = [];
+    for (const name of sorted) {
+      const cat = allCategories.find(c => c.name === name);
+      if (cat) result.push(cat);
+      if (result.length === 5) break;
+    }
+    
+    if (result.length < 5) {
+      const fallback = allCategories.filter(c => !result.some(r => r.name === c.name));
+      result.push(...fallback.slice(0, 5 - result.length));
+    }
+    return result;
+  }, [expenses, allCategories]);
+
+  const openAddExpense = (prefillCategory?: Category) => {
     setEditingExpense(null);
 
     const lastProject = loadLastProject(); // Load from localStorage
@@ -617,13 +644,43 @@ export default function App() {
     setDraft({
       project: defaultProject,
       amount: '',
-      category: '',
-      emoji: '🏷️',
+      category: prefillCategory ? prefillCategory.name : '',
+      emoji: prefillCategory ? prefillCategory.emoji : '🏷️',
       date: toLocalIsoDate(new Date()),
       comment: '',
     receiptFileId: null,
     });
     setExpenseModalOpen(true);
+  };
+
+  const handleFabPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return; // Μόνο αριστερό κλικ / αφή
+    if (fabMenuOpen) {
+      setFabMenuOpen(false);
+      return;
+    }
+    longPressTimer.current = setTimeout(() => {
+      setFabMenuOpen(true);
+      longPressTimer.current = null;
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(50); // Haptic feedback στο κινητό!
+      }
+    }, 400); // 400ms πατημένο για να ανοίξει
+  };
+
+  const handleFabPointerUp = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+      openAddExpense(); // Ήταν απλό κλικ, άνοιξε την κενή φόρμα
+    }
+  };
+
+  const handleFabPointerCancel = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
   };
 
   const openEditExpense = (expense: Expense) => {
@@ -1857,10 +1914,54 @@ export default function App() {
 
       {/* Floating Action Button (FAB) for adding expenses */}
       {showDashboard && !isAnyModalOpen && (
-        <button
-          className="fab-button"
-          onClick={openAddExpense}
-          style={{
+        <>
+          {fabMenuOpen && (
+            <div 
+              className="fab-backdrop" 
+              onClick={() => setFabMenuOpen(false)}
+            />
+          )}
+
+          {fabMenuOpen && (
+            <div 
+              style={{
+                position: 'fixed',
+                bottom: '120px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                width: '48px',
+                display: 'flex',
+                flexDirection: 'column-reverse',
+                gap: '16px',
+                zIndex: 1001,
+              }}
+            >
+              {topCategories.map((cat, i) => (
+                <div key={cat.id} style={{ position: 'relative', width: '48px', height: '48px', '--i': i } as React.CSSProperties} className="fab-bubble-wrap">
+                  <span className="fab-bubble-label">{getLocalizedCategoryName(locale, cat.name)}</span>
+                  <button
+                    className="fab-bubble"
+                    onClick={() => {
+                      setFabMenuOpen(false);
+                      openAddExpense(cat);
+                    }}
+                    title={getLocalizedCategoryName(locale, cat.name)}
+                  >
+                    {cat.emoji}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button
+            className={`fab-button ${fabMenuOpen ? 'open' : ''}`}
+            onPointerDown={handleFabPointerDown}
+            onPointerUp={handleFabPointerUp}
+            onPointerLeave={handleFabPointerCancel}
+            onPointerCancel={handleFabPointerCancel}
+            onContextMenu={(e) => e.preventDefault()} // Αποτροπή εμφάνισης μενού του browser
+            style={{
             position: 'fixed',
             bottom: '40px',
             left: '50%',
@@ -1877,12 +1978,16 @@ export default function App() {
             fontWeight: '300',
             boxShadow: '0 8px 32px rgba(10, 132, 255, 0.4), 0 2px 8px rgba(0, 0, 0, 0.5)',
             cursor: 'pointer',
-            zIndex: 10
+              zIndex: 1002,
+              touchAction: 'none', // Σημαντικό για να δουλεύει το Long Press σε οθόνες αφής
+              userSelect: 'none',
+              WebkitUserSelect: 'none'
           }}
           title={t(locale, 'addExpense')}
         >
           <span style={{ marginTop: '-4px' }}>+</span>
         </button>
+        </>
       )}
 
       {/* Monthly Wrapped Modal */}
