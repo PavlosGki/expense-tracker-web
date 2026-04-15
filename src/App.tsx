@@ -609,6 +609,30 @@ export default function App() {
     }
   }, [analyticsModal, budgetPaceView.mode]);
 
+  const monthHeatmapData = useMemo(() => {
+    if (range !== 'month') return null;
+    
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const firstDayDow = (new Date(year, month, 1).getDay() + 6) % 7; 
+    
+    const dailySpend = new Array(daysInMonth).fill(0);
+    
+    donutPeriodExpenses.forEach((exp) => {
+      if (!exp.date) return;
+      const expDate = parseIsoDateToLocal(exp.date);
+      if (expDate.getFullYear() === year && expDate.getMonth() === month) {
+        dailySpend[expDate.getDate() - 1] += Number.parseFloat(exp.amount) || 0;
+      }
+    });
+    
+    const maxSpend = Math.max(...dailySpend, 1);
+    
+    return { daysInMonth, firstDayDow, dailySpend, maxSpend };
+  }, [range, donutPeriodExpenses]);
+
   const topCategories = useMemo(() => {
     const frequency: Record<string, number> = {};
     expenses.forEach(e => {
@@ -1577,6 +1601,63 @@ export default function App() {
                   <span>{categoryDonut.total > 0 ? `${categoryDonut.total.toFixed(0)}€` : '0€'}</span>
                 </div>
               </article>
+
+              {range === 'month' && monthHeatmapData && (
+                <article className="panel analytics-hero-card">
+                  <p className="panel-label">{t(locale, 'analyticsSpendingHeatmap')}</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginTop: '16px', textAlign: 'center', fontSize: '10px', color: '#8e8e93', marginBottom: '4px' }}>
+                    {locale === 'el' ? ['Δ', 'Τ', 'Τ', 'Π', 'Π', 'Σ', 'Κ'].map((d, i) => <span key={i}>{d}</span>) : ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={i}>{d}</span>)}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+                    {Array.from({ length: monthHeatmapData.firstDayDow }).map((_, i) => (
+                      <div key={`empty-${i}`} style={{ aspectRatio: '1/1', background: 'transparent' }} />
+                    ))}
+                    {monthHeatmapData.dailySpend.map((amount, index) => {
+                      const dayOfMonth = index + 1;
+                      let bgColor = '#2c2c2e'; 
+                      if (amount > 0) {
+                        const ratio = amount / monthHeatmapData.maxSpend;
+                        if (ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
+                        else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
+                        else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
+                        else bgColor = '#ff453a';
+                      }
+                      
+                      const isToday = new Date().getDate() === dayOfMonth;
+                      
+                      return (
+                        <div
+                          key={`day-${dayOfMonth}`}
+                          title={`${dayOfMonth}: ${amount.toFixed(2)}€`}
+                          style={{
+                            aspectRatio: '1/1',
+                            background: bgColor,
+                            borderRadius: '4px',
+                            border: isToday ? '1px solid rgba(255, 255, 255, 0.8)' : '1px solid rgba(255,255,255,0.05)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '11px',
+                            color: amount > monthHeatmapData.maxSpend * 0.5 ? '#fff' : 'rgba(255,255,255,0.7)',
+                            fontWeight: isToday ? 'bold' : 'normal'
+                          }}
+                        >
+                          {dayOfMonth}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '4px', marginTop: '12px', fontSize: '10px', color: '#8e8e93' }}>
+                    <span>{t(locale, 'heatmapLow')}</span>
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#2c2c2e' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.25)' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.5)' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.75)' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#ff453a' }} />
+                    <span>{t(locale, 'heatmapHigh')}</span>
+                  </div>
+                </article>
+              )}
             </section>
 
             {hasActiveFilter && (
