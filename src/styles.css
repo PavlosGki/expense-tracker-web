@@ -504,6 +504,147 @@ button {
   margin: 0;
 }
 
+.heatmap-modal-month-label {
+  margin: 4px 0 0;
+  color: #8e8e93;
+  font-size: 0.82rem;
+}
+
+.heatmap-card-month-label {
+  margin: -6px 0 2px;
+  color: #8e8e93;
+  font-size: 0.78rem;
+}
+
+.heatmap-card-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 2px;
+  margin-bottom: 3px;
+  text-align: center;
+  font-size: 10px;
+  color: #8e8e93;
+}
+
+.heatmap-card-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+
+.heatmap-card-empty {
+  aspect-ratio: 1 / 1;
+  background: transparent;
+}
+
+.heatmap-card-legend {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 4px;
+  font-size: 10px;
+  color: #8e8e93;
+  flex-wrap: nowrap;
+}
+
+.year-heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 2px auto 0;
+  width: min(100%, 260px);
+}
+
+.year-heatmap-cell {
+  aspect-ratio: 1.65 / 1;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.year-heatmap-cell span {
+  font-size: 0.64rem;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+}
+
+.year-heatmap-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.week-heatmap-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.week-heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin: 4px 0 2px;
+}
+
+.week-heatmap-cell {
+  aspect-ratio: 1 / 1;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.week-heatmap-cell span {
+  font-size: 0.64rem;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.year-heatmap-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.week-heatmap-modal-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.week-heatmap-modal-cell {
+  min-height: 68px;
+}
+
+.year-heatmap-modal-cell {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 10px 8px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  color: #fff;
+}
+
+.year-heatmap-modal-cell span {
+  font-size: 0.72rem;
+  line-height: 1.15;
+  font-weight: 600;
+}
+
+.year-heatmap-modal-cell strong {
+  font-size: 0.82rem;
+}
+
+
 .analytics-modal-line-svg {
   width: 100%;
   height: auto;
@@ -1123,6 +1264,14 @@ button {
   padding: 18px;
   overflow: hidden;
   animation: modalPop 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.modal-card.modal-no-pop {
+  animation: none;
+}
+
+.modal-backdrop.modal-no-fade {
+  animation: none;
 }
 
 .fab-backdrop {

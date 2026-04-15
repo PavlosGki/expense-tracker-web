@@ -101,6 +101,10 @@ const compressImage = (file: File): Promise<Blob | File> => {
 };
 
 export default function App() {
+  const YEAR_HEATMAP_MONTH_LABELS_EL = ['ΙΑΝ', 'ΦΕΒ', 'ΜΑΡ', 'ΑΠΡ', 'ΜΑΙ', 'ΙΟΥΝ', 'ΙΟΥΛ', 'ΑΥΓ', 'ΣΕΠ', 'ΟΚΤ', 'ΝΟΕ', 'ΔΕΚ'];
+  const YEAR_HEATMAP_MONTH_LABELS_EN = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const YEAR_HEATMAP_MONTH_FULL_EL = ['Ιανουάριος', 'Φεβρουάριος', 'Μάρτιος', 'Απρίλιος', 'Μάιος', 'Ιούνιος', 'Ιούλιος', 'Αύγουστος', 'Σεπτέμβριος', 'Οκτώβριος', 'Νοέμβριος', 'Δεκέμβριος'];
+  const YEAR_HEATMAP_MONTH_FULL_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const [locale, setLocale] = useState<Locale>(() => loadLocale());
   const [tab, setTab] = useState<TabId>('home');
   const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
@@ -122,9 +126,24 @@ export default function App() {
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
-  const [analyticsModal, setAnalyticsModal] = useState<null | 'pace' | 'donut' | 'heatmap'>(null);
+  const [analyticsModal, setAnalyticsModal] = useState<null | 'pace' | 'donut' | 'heatmap' | 'yearHeatmap' | 'weekHeatmap'>(null);
   const [activeDonutSliceName, setActiveDonutSliceName] = useState<string | null>(null);
   const [activeHeatmapDay, setActiveHeatmapDay] = useState<number | null>(null);
+  const [seamlessHeatmapTransition, setSeamlessHeatmapTransition] = useState(false);
+  const [yearHeatmapViewYear, setYearHeatmapViewYear] = useState(() => new Date().getFullYear());
+  const [heatmapViewDate, setHeatmapViewDate] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [weekHeatmapViewStartDate, setWeekHeatmapViewStartDate] = useState(() => {
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setHours(0, 0, 0, 0);
+    const isoDow0Mon = (weekStart.getDay() + 6) % 7;
+    weekStart.setDate(weekStart.getDate() - isoDow0Mon);
+    return weekStart;
+  });
+  const [activeWeekHeatmapDayIndex, setActiveWeekHeatmapDayIndex] = useState<number>(() => (new Date().getDay() + 6) % 7);
   const [categoryModalForExpense, setCategoryModalForExpense] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [isInitialSyncDone, setIsInitialSyncDone] = useState(false);
@@ -160,6 +179,21 @@ export default function App() {
     topCategory: { name: string; emoji: string; amount: number } | null;
   } | null>(null);
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
+  const heatmapTouchStartXRef = useRef<number | null>(null);
+  const heatmapMouseStartXRef = useRef<number | null>(null);
+  const heatmapMouseCurrentXRef = useRef<number | null>(null);
+  const heatmapMouseDraggingRef = useRef(false);
+  const heatmapPreventClickRef = useRef(false);
+  const yearHeatmapTouchStartXRef = useRef<number | null>(null);
+  const yearHeatmapMouseStartXRef = useRef<number | null>(null);
+  const yearHeatmapMouseCurrentXRef = useRef<number | null>(null);
+  const yearHeatmapMouseDraggingRef = useRef(false);
+  const yearHeatmapPreventClickRef = useRef(false);
+  const weekHeatmapTouchStartXRef = useRef<number | null>(null);
+  const weekHeatmapMouseStartXRef = useRef<number | null>(null);
+  const weekHeatmapMouseCurrentXRef = useRef<number | null>(null);
+  const weekHeatmapMouseDraggingRef = useRef(false);
+  const weekHeatmapPreventClickRef = useRef(false);
   const stickyShellRef = useRef<HTMLDivElement | null>(null);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const activeBudgetSlideRef = useRef(Number(localStorage.getItem('expense_active_budget_slide')) || 0);
@@ -614,20 +648,22 @@ export default function App() {
       setAnalyticsModal(null);
     }
   }, [analyticsModal, budgetPaceView.mode]);
+  useEffect(() => {
+    if (analyticsModal !== 'heatmap') {
+      setSeamlessHeatmapTransition(false);
+    }
+  }, [analyticsModal]);
 
   const monthHeatmapData = useMemo(() => {
-    if (range !== 'month') return null;
-    
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = today.getMonth();
+    const year = heatmapViewDate.getFullYear();
+    const month = heatmapViewDate.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const firstDayDow = (new Date(year, month, 1).getDay() + 6) % 7; 
     
     const dailySpend = new Array(daysInMonth).fill(0);
     const dailyExpenses: Expense[][] = Array.from({ length: daysInMonth }, () => []);
     
-    donutPeriodExpenses.forEach((exp) => {
+    filteredExpenses.forEach((exp) => {
       if (!exp.date) return;
       const expDate = parseIsoDateToLocal(exp.date);
       if (expDate.getFullYear() === year && expDate.getMonth() === month) {
@@ -640,7 +676,69 @@ export default function App() {
     const maxSpend = Math.max(...dailySpend, 1);
     
     return { year, month, daysInMonth, firstDayDow, dailySpend, dailyExpenses, maxSpend };
-  }, [range, donutPeriodExpenses]);
+  }, [filteredExpenses, heatmapViewDate]);
+
+  const yearHeatmapData = useMemo(() => {
+    const year = yearHeatmapViewYear;
+    const monthlySpend = Array.from({ length: 12 }, () => 0);
+    filteredExpenses.forEach((expense) => {
+      if (!expense.date) return;
+      const expDate = parseIsoDateToLocal(expense.date);
+      if (expDate.getFullYear() !== year) return;
+      monthlySpend[expDate.getMonth()] += Number.parseFloat(expense.amount) || 0;
+    });
+
+    return {
+      year,
+      monthlySpend,
+      maxSpend: Math.max(...monthlySpend, 1),
+    };
+  }, [filteredExpenses, yearHeatmapViewYear]);
+
+  const weekHeatmapData = useMemo(() => {
+    const days = Array.from({ length: 7 }, (_, idx) => {
+      const date = new Date(weekHeatmapViewStartDate);
+      date.setDate(weekHeatmapViewStartDate.getDate() + idx);
+      date.setHours(0, 0, 0, 0);
+      return date;
+    });
+
+    const dailySpend = new Array(7).fill(0);
+    const dailyExpenses: Expense[][] = Array.from({ length: 7 }, () => []);
+
+    filteredExpenses.forEach((exp) => {
+      if (!exp.date) return;
+      const expDate = parseIsoDateToLocal(exp.date);
+      expDate.setHours(0, 0, 0, 0);
+      const dayIndex = days.findIndex((d) => d.getTime() === expDate.getTime());
+      if (dayIndex === -1) return;
+      dailySpend[dayIndex] += Number.parseFloat(exp.amount) || 0;
+      dailyExpenses[dayIndex].push(exp);
+    });
+
+    return {
+      days,
+      dailySpend,
+      dailyExpenses,
+      maxSpend: Math.max(...dailySpend, 1),
+    };
+  }, [filteredExpenses, weekHeatmapViewStartDate]);
+
+  const shiftHeatmapMonth = (direction: -1 | 1) => {
+    setHeatmapViewDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + direction, 1));
+    setActiveHeatmapDay(1);
+  };
+  const shiftYearHeatmap = (direction: -1 | 1) => {
+    setYearHeatmapViewYear((prev) => prev + direction);
+  };
+  const shiftWeekHeatmap = (direction: -1 | 1) => {
+    setWeekHeatmapViewStartDate((prev) => {
+      const next = new Date(prev);
+      next.setDate(prev.getDate() + direction * 7);
+      return next;
+    });
+    setActiveWeekHeatmapDayIndex(0);
+  };
 
   const topCategories = useMemo(() => {
     const frequency: Record<string, number> = {};
@@ -1674,17 +1772,23 @@ export default function App() {
                   role="button"
                   tabIndex={0}
                   onClick={() => {
+                    setSeamlessHeatmapTransition(false);
                     setAnalyticsModal('heatmap');
+                    const now = new Date();
+                    setHeatmapViewDate(new Date(now.getFullYear(), now.getMonth(), 1));
                     setActiveHeatmapDay(new Date().getDate());
                   }}
                 >
                   <p className="panel-label">{t(locale, 'analyticsSpendingHeatmap')}</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginTop: '16px', textAlign: 'center', fontSize: '10px', color: '#8e8e93', marginBottom: '4px' }}>
+                  <p className="heatmap-card-month-label">
+                    {getLocalizedMonthAcc(locale, monthHeatmapData.month)} {monthHeatmapData.year}
+                  </p>
+                  <div className="heatmap-card-weekdays">
                     {locale === 'el' ? ['Δ', 'Τ', 'Τ', 'Π', 'Π', 'Σ', 'Κ'].map((d, i) => <span key={i}>{d}</span>) : ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={i}>{d}</span>)}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+                  <div className="heatmap-card-grid">
                     {Array.from({ length: monthHeatmapData.firstDayDow }).map((_, i) => (
-                      <div key={`empty-${i}`} style={{ aspectRatio: '1/1', background: 'transparent' }} />
+                      <div key={`empty-${i}`} className="heatmap-card-empty" />
                     ))}
                     {monthHeatmapData.dailySpend.map((amount, index) => {
                       const dayOfMonth = index + 1;
@@ -1704,14 +1808,14 @@ export default function App() {
                           key={`day-${dayOfMonth}`}
                           title={`${dayOfMonth}: ${amount.toFixed(2)}€`}
                           style={{
-                            aspectRatio: '1/1',
                             background: bgColor,
-                            borderRadius: '4px',
+                            aspectRatio: '1/1',
+                            borderRadius: '5px',
                             border: isToday ? '1px solid rgba(255, 255, 255, 0.8)' : '1px solid rgba(255,255,255,0.05)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: '11px',
+                            fontSize: 'clamp(9px, 1.6vw, 11px)',
                             color: amount > monthHeatmapData.maxSpend * 0.5 ? '#fff' : 'rgba(255,255,255,0.7)',
                             fontWeight: isToday ? 'bold' : 'normal'
                           }}
@@ -1721,7 +1825,117 @@ export default function App() {
                       );
                     })}
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '4px', marginTop: '12px', fontSize: '10px', color: '#8e8e93' }}>
+                  <div className="heatmap-card-legend">
+                    <span>{t(locale, 'heatmapLow')}</span>
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#2c2c2e' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.25)' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.5)' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.75)' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#ff453a' }} />
+                    <span>{t(locale, 'heatmapHigh')}</span>
+                  </div>
+                </article>
+              )}
+
+              {range === 'week' && weekHeatmapData && (
+                <article
+                  className="panel analytics-hero-card analytics-openable-card week-heatmap-card"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setSeamlessHeatmapTransition(false);
+                    const now = new Date();
+                    const weekStart = new Date(now);
+                    weekStart.setHours(0, 0, 0, 0);
+                    const isoDow0Mon = (weekStart.getDay() + 6) % 7;
+                    weekStart.setDate(weekStart.getDate() - isoDow0Mon);
+                    setWeekHeatmapViewStartDate(weekStart);
+                    setActiveWeekHeatmapDayIndex(isoDow0Mon);
+                    setAnalyticsModal('weekHeatmap');
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      const now = new Date();
+                      const weekStart = new Date(now);
+                      weekStart.setHours(0, 0, 0, 0);
+                      const isoDow0Mon = (weekStart.getDay() + 6) % 7;
+                      weekStart.setDate(weekStart.getDate() - isoDow0Mon);
+                      setWeekHeatmapViewStartDate(weekStart);
+                      setActiveWeekHeatmapDayIndex(isoDow0Mon);
+                      setAnalyticsModal('weekHeatmap');
+                    }
+                  }}
+                >
+                  <p className="panel-label">{t(locale, 'analyticsSpendingHeatmap')}</p>
+                  <p className="heatmap-card-month-label">
+                    {`${weekHeatmapData.days[0].getDate()}/${weekHeatmapData.days[0].getMonth() + 1} - ${weekHeatmapData.days[6].getDate()}/${weekHeatmapData.days[6].getMonth() + 1}`}
+                  </p>
+                  <div className="week-heatmap-grid">
+                    {weekHeatmapData.dailySpend.map((amount, index) => {
+                      const ratio = amount > 0 ? amount / weekHeatmapData.maxSpend : 0;
+                      let bgColor = '#2c2c2e';
+                      if (ratio > 0 && ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
+                      else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
+                      else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
+                      else if (ratio > 0.75) bgColor = '#ff453a';
+
+                      const day = weekHeatmapData.days[index];
+                      return (
+                        <div key={`week_day_${index}`} className="week-heatmap-cell" style={{ background: bgColor }}>
+                          <span>{day.getDate()}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="heatmap-card-legend">
+                    <span>{t(locale, 'heatmapLow')}</span>
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#2c2c2e' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.25)' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.5)' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.75)' }} />
+                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#ff453a' }} />
+                    <span>{t(locale, 'heatmapHigh')}</span>
+                  </div>
+                </article>
+              )}
+
+              {range === 'year' && yearHeatmapData && (
+                <article
+                  className="panel analytics-hero-card analytics-openable-card year-heatmap-card"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setSeamlessHeatmapTransition(false);
+                    setAnalyticsModal('yearHeatmap');
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSeamlessHeatmapTransition(false);
+                      setAnalyticsModal('yearHeatmap');
+                    }
+                  }}
+                >
+                  <p className="panel-label">{t(locale, 'analyticsSpendingHeatmap')}</p>
+                  <p className="heatmap-card-month-label">{yearHeatmapData.year}</p>
+                  <div className="year-heatmap-grid">
+                    {yearHeatmapData.monthlySpend.map((amount, monthIndex) => {
+                      const ratio = amount > 0 ? amount / yearHeatmapData.maxSpend : 0;
+                      let bgColor = '#2c2c2e';
+                      if (ratio > 0 && ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
+                      else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
+                      else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
+                      else if (ratio > 0.75) bgColor = '#ff453a';
+
+                      return (
+                        <div key={`year_month_${monthIndex}`} className="year-heatmap-cell" style={{ background: bgColor }}>
+                          <span>{locale === 'el' ? YEAR_HEATMAP_MONTH_LABELS_EL[monthIndex] : YEAR_HEATMAP_MONTH_LABELS_EN[monthIndex]}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="heatmap-card-legend">
                     <span>{t(locale, 'heatmapLow')}</span>
                     <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#2c2c2e' }} />
                     <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.25)' }} />
@@ -2375,10 +2589,77 @@ export default function App() {
       )}
 
       {analyticsModal === 'heatmap' && monthHeatmapData && (
-        <div className="modal-backdrop" onClick={() => setAnalyticsModal(null)}>
-          <div className="modal-card analytics-modal-card" style={{ maxWidth: '400px', margin: 'auto', left: 0, right: 0 }} onClick={(event) => event.stopPropagation()}>
+        <div className={`modal-backdrop ${seamlessHeatmapTransition ? 'modal-no-fade' : ''}`} onClick={() => setAnalyticsModal(null)}>
+          <div
+            className={`modal-card analytics-modal-card ${seamlessHeatmapTransition ? 'modal-no-pop' : ''}`}
+            style={{ maxWidth: '400px', margin: 'auto', left: 0, right: 0, cursor: 'grab' }}
+            onClick={(event) => event.stopPropagation()}
+            onClickCapture={(event) => {
+              if (heatmapPreventClickRef.current) {
+                event.preventDefault();
+                event.stopPropagation();
+                heatmapPreventClickRef.current = false;
+              }
+            }}
+            onTouchStart={(event) => {
+              heatmapTouchStartXRef.current = event.changedTouches[0]?.clientX ?? null;
+            }}
+            onTouchEnd={(event) => {
+              const startX = heatmapTouchStartXRef.current;
+              const endX = event.changedTouches[0]?.clientX;
+              heatmapTouchStartXRef.current = null;
+              if (startX == null || endX == null) return;
+              const deltaX = endX - startX;
+              if (deltaX <= -50) {
+                shiftHeatmapMonth(1);
+              } else if (deltaX >= 50) {
+                shiftHeatmapMonth(-1);
+              }
+            }}
+            onMouseDown={(event) => {
+              heatmapMouseDraggingRef.current = true;
+              heatmapMouseStartXRef.current = event.clientX;
+              heatmapMouseCurrentXRef.current = event.clientX;
+              heatmapPreventClickRef.current = false;
+            }}
+            onMouseMove={(event) => {
+              if (!heatmapMouseDraggingRef.current) return;
+              heatmapMouseCurrentXRef.current = event.clientX;
+              if (
+                heatmapMouseStartXRef.current != null &&
+                Math.abs(event.clientX - heatmapMouseStartXRef.current) > 6
+              ) {
+                heatmapPreventClickRef.current = true;
+              }
+            }}
+            onMouseUp={() => {
+              if (!heatmapMouseDraggingRef.current) return;
+              const startX = heatmapMouseStartXRef.current;
+              const endX = heatmapMouseCurrentXRef.current;
+              heatmapMouseDraggingRef.current = false;
+              heatmapMouseStartXRef.current = null;
+              heatmapMouseCurrentXRef.current = null;
+              if (startX == null || endX == null) return;
+              const deltaX = endX - startX;
+              if (deltaX <= -50) {
+                shiftHeatmapMonth(1);
+              } else if (deltaX >= 50) {
+                shiftHeatmapMonth(-1);
+              }
+            }}
+            onMouseLeave={() => {
+              heatmapMouseDraggingRef.current = false;
+              heatmapMouseStartXRef.current = null;
+              heatmapMouseCurrentXRef.current = null;
+            }}
+          >
             <div className="analytics-modal-header">
-              <h3>{t(locale, 'analyticsSpendingHeatmap')}</h3>
+              <div>
+                <h3>{t(locale, 'analyticsSpendingHeatmap')}</h3>
+                <p className="heatmap-modal-month-label">
+                  {getLocalizedMonthAcc(locale, monthHeatmapData.month)} {monthHeatmapData.year}
+                </p>
+              </div>
               <button className="ghost-btn" onClick={() => setAnalyticsModal(null)}>
                 {t(locale, 'close')}
               </button>
@@ -2464,6 +2745,270 @@ export default function App() {
                 </p>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {analyticsModal === 'weekHeatmap' && weekHeatmapData && (
+        <div className="modal-backdrop" onClick={() => setAnalyticsModal(null)}>
+          <div
+            className="modal-card analytics-modal-card"
+            style={{ maxWidth: '400px', margin: 'auto', left: 0, right: 0, cursor: 'grab' }}
+            onClick={(event) => event.stopPropagation()}
+            onClickCapture={(event) => {
+              if (weekHeatmapPreventClickRef.current) {
+                event.preventDefault();
+                event.stopPropagation();
+                weekHeatmapPreventClickRef.current = false;
+              }
+            }}
+            onTouchStart={(event) => {
+              weekHeatmapTouchStartXRef.current = event.changedTouches[0]?.clientX ?? null;
+            }}
+            onTouchEnd={(event) => {
+              const startX = weekHeatmapTouchStartXRef.current;
+              const endX = event.changedTouches[0]?.clientX;
+              weekHeatmapTouchStartXRef.current = null;
+              if (startX == null || endX == null) return;
+              const deltaX = endX - startX;
+              if (deltaX <= -50) {
+                shiftWeekHeatmap(1);
+              } else if (deltaX >= 50) {
+                shiftWeekHeatmap(-1);
+              }
+            }}
+            onMouseDown={(event) => {
+              weekHeatmapMouseDraggingRef.current = true;
+              weekHeatmapMouseStartXRef.current = event.clientX;
+              weekHeatmapMouseCurrentXRef.current = event.clientX;
+              weekHeatmapPreventClickRef.current = false;
+            }}
+            onMouseMove={(event) => {
+              if (!weekHeatmapMouseDraggingRef.current) return;
+              weekHeatmapMouseCurrentXRef.current = event.clientX;
+              if (
+                weekHeatmapMouseStartXRef.current != null &&
+                Math.abs(event.clientX - weekHeatmapMouseStartXRef.current) > 6
+              ) {
+                weekHeatmapPreventClickRef.current = true;
+              }
+            }}
+            onMouseUp={() => {
+              if (!weekHeatmapMouseDraggingRef.current) return;
+              const startX = weekHeatmapMouseStartXRef.current;
+              const endX = weekHeatmapMouseCurrentXRef.current;
+              weekHeatmapMouseDraggingRef.current = false;
+              weekHeatmapMouseStartXRef.current = null;
+              weekHeatmapMouseCurrentXRef.current = null;
+              if (startX == null || endX == null) return;
+              const deltaX = endX - startX;
+              if (deltaX <= -50) {
+                shiftWeekHeatmap(1);
+              } else if (deltaX >= 50) {
+                shiftWeekHeatmap(-1);
+              }
+            }}
+            onMouseLeave={() => {
+              weekHeatmapMouseDraggingRef.current = false;
+              weekHeatmapMouseStartXRef.current = null;
+              weekHeatmapMouseCurrentXRef.current = null;
+            }}
+          >
+            <div className="analytics-modal-header">
+              <div>
+                <h3>{t(locale, 'analyticsSpendingHeatmap')}</h3>
+                <p className="heatmap-modal-month-label">
+                  {`${weekHeatmapData.days[0].getDate()}/${weekHeatmapData.days[0].getMonth() + 1} - ${weekHeatmapData.days[6].getDate()}/${weekHeatmapData.days[6].getMonth() + 1}`}
+                </p>
+              </div>
+              <button className="ghost-btn" onClick={() => setAnalyticsModal(null)}>
+                {t(locale, 'close')}
+              </button>
+            </div>
+
+            <div className="year-heatmap-modal-grid week-heatmap-modal-grid">
+              {weekHeatmapData.dailySpend.map((amount, dayIndex) => {
+                const ratio = amount > 0 ? amount / weekHeatmapData.maxSpend : 0;
+                let bgColor = '#2c2c2e';
+                if (ratio > 0 && ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
+                else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
+                else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
+                else if (ratio > 0.75) bgColor = '#ff453a';
+                const dayDate = weekHeatmapData.days[dayIndex];
+                const isToday = new Date().toDateString() === dayDate.toDateString();
+                const isSelected = activeWeekHeatmapDayIndex === dayIndex;
+                return (
+                  <button
+                    key={`week_modal_day_${dayIndex}`}
+                    className="year-heatmap-modal-cell week-heatmap-modal-cell"
+                    style={{
+                      background: bgColor,
+                      borderColor: isSelected ? '#0a84ff' : isToday ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.1)',
+                      boxShadow: isSelected ? '0 0 0 1px #0a84ff inset' : 'none'
+                    }}
+                    onClick={() => setActiveWeekHeatmapDayIndex(dayIndex)}
+                  >
+                    <span>
+                      {dayDate.toLocaleDateString(locale === 'el' ? 'el-GR' : 'en-US', {
+                        weekday: 'short',
+                        day: 'numeric',
+                        month: 'short',
+                      })}
+                    </span>
+                    <strong>{amount.toFixed(0)}€</strong>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{ marginTop: '16px', padding: '14px', background: '#111214', borderRadius: '14px', border: '1px solid #2c2c2e', height: '240px', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h4 style={{ margin: 0, fontSize: '15px' }}>
+                  {weekHeatmapData.days[activeWeekHeatmapDayIndex].toLocaleDateString(locale === 'el' ? 'el-GR' : 'en-US', {
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long',
+                  })}
+                </h4>
+                <strong style={{ fontSize: '16px' }}>
+                  {weekHeatmapData.dailySpend[activeWeekHeatmapDayIndex].toFixed(2)}€
+                </strong>
+              </div>
+
+              {weekHeatmapData.dailyExpenses[activeWeekHeatmapDayIndex].length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
+                  {weekHeatmapData.dailyExpenses[activeWeekHeatmapDayIndex].map((exp) => (
+                    <div key={exp.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '18px' }}>{exp.emoji}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '14px', fontWeight: '500' }}>{getLocalizedCategoryName(locale, exp.category)}</span>
+                          {exp.comment && <span style={{ fontSize: '12px', color: '#8e8e93' }}>{exp.comment}</span>}
+                        </div>
+                      </div>
+                      <strong style={{ fontSize: '14px' }}>{Number.parseFloat(exp.amount).toFixed(2)}€</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ margin: 'auto', fontSize: '14px', color: '#8e8e93', textAlign: 'center' }}>
+                  {t(locale, 'noExpenses')}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {analyticsModal === 'yearHeatmap' && yearHeatmapData && (
+        <div className="modal-backdrop" onClick={() => setAnalyticsModal(null)}>
+          <div
+            className="modal-card analytics-modal-card"
+            style={{ maxWidth: '460px', margin: 'auto', left: 0, right: 0, cursor: 'grab' }}
+            onClick={(event) => event.stopPropagation()}
+            onClickCapture={(event) => {
+              if (yearHeatmapPreventClickRef.current) {
+                event.preventDefault();
+                event.stopPropagation();
+                yearHeatmapPreventClickRef.current = false;
+              }
+            }}
+            onTouchStart={(event) => {
+              yearHeatmapTouchStartXRef.current = event.changedTouches[0]?.clientX ?? null;
+            }}
+            onTouchEnd={(event) => {
+              const startX = yearHeatmapTouchStartXRef.current;
+              const endX = event.changedTouches[0]?.clientX;
+              yearHeatmapTouchStartXRef.current = null;
+              if (startX == null || endX == null) return;
+              const deltaX = endX - startX;
+              if (deltaX <= -50) {
+                shiftYearHeatmap(1);
+              } else if (deltaX >= 50) {
+                shiftYearHeatmap(-1);
+              }
+            }}
+            onMouseDown={(event) => {
+              yearHeatmapMouseDraggingRef.current = true;
+              yearHeatmapMouseStartXRef.current = event.clientX;
+              yearHeatmapMouseCurrentXRef.current = event.clientX;
+              yearHeatmapPreventClickRef.current = false;
+            }}
+            onMouseMove={(event) => {
+              if (!yearHeatmapMouseDraggingRef.current) return;
+              yearHeatmapMouseCurrentXRef.current = event.clientX;
+              if (
+                yearHeatmapMouseStartXRef.current != null &&
+                Math.abs(event.clientX - yearHeatmapMouseStartXRef.current) > 6
+              ) {
+                yearHeatmapPreventClickRef.current = true;
+              }
+            }}
+            onMouseUp={() => {
+              if (!yearHeatmapMouseDraggingRef.current) return;
+              const startX = yearHeatmapMouseStartXRef.current;
+              const endX = yearHeatmapMouseCurrentXRef.current;
+              yearHeatmapMouseDraggingRef.current = false;
+              yearHeatmapMouseStartXRef.current = null;
+              yearHeatmapMouseCurrentXRef.current = null;
+              if (startX == null || endX == null) return;
+              const deltaX = endX - startX;
+              if (deltaX <= -50) {
+                shiftYearHeatmap(1);
+              } else if (deltaX >= 50) {
+                shiftYearHeatmap(-1);
+              }
+            }}
+            onMouseLeave={() => {
+              yearHeatmapMouseDraggingRef.current = false;
+              yearHeatmapMouseStartXRef.current = null;
+              yearHeatmapMouseCurrentXRef.current = null;
+            }}
+          >
+            <div className="analytics-modal-header">
+              <div>
+                <h3>{t(locale, 'analyticsSpendingHeatmap')}</h3>
+                <p className="heatmap-modal-month-label">{yearHeatmapData.year}</p>
+              </div>
+              <button className="ghost-btn" onClick={() => setAnalyticsModal(null)}>
+                {t(locale, 'close')}
+              </button>
+            </div>
+
+            <div className="year-heatmap-modal-grid">
+              {yearHeatmapData.monthlySpend.map((amount, monthIndex) => {
+                const ratio = amount > 0 ? amount / yearHeatmapData.maxSpend : 0;
+                let bgColor = '#2c2c2e';
+                if (ratio > 0 && ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
+                else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
+                else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
+                else if (ratio > 0.75) bgColor = '#ff453a';
+
+                return (
+                  <button
+                    key={`year_modal_month_${monthIndex}`}
+                    className="year-heatmap-modal-cell"
+                    style={{ background: bgColor }}
+                    onClick={() => {
+                      const selectedDate = new Date(yearHeatmapData.year, monthIndex, 1);
+                      const now = new Date();
+                      setSeamlessHeatmapTransition(true);
+                      setHeatmapViewDate(selectedDate);
+                      setActiveHeatmapDay(
+                        now.getFullYear() === selectedDate.getFullYear() && now.getMonth() === selectedDate.getMonth()
+                          ? now.getDate()
+                          : 1
+                      );
+                      setAnalyticsModal('heatmap');
+                    }}
+                  >
+                    <span>{locale === 'el' ? YEAR_HEATMAP_MONTH_FULL_EL[monthIndex] : YEAR_HEATMAP_MONTH_FULL_EN[monthIndex]}</span>
+                    <strong>{amount.toFixed(0)}€</strong>
+                  </button>
+                );
+              })}
+            </div>
+
           </div>
         </div>
       )}
