@@ -2300,6 +2300,100 @@ export default function App() {
         </div>
       )}
 
+      {analyticsModal === 'heatmap' && monthHeatmapData && (
+        <div className="modal-backdrop" onClick={() => setAnalyticsModal(null)}>
+          <div className="modal-card analytics-modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="analytics-modal-header">
+              <h3>{t(locale, 'analyticsSpendingHeatmap')}</h3>
+              <button className="ghost-btn" onClick={() => setAnalyticsModal(null)}>
+                {t(locale, 'close')}
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', marginTop: '16px', textAlign: 'center', fontSize: '12px', color: '#8e8e93', marginBottom: '8px' }}>
+              {locale === 'el' ? ['Δ', 'Τ', 'Τ', 'Π', 'Π', 'Σ', 'Κ'].map((d, i) => <span key={i}>{d}</span>) : ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={i}>{d}</span>)}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
+              {Array.from({ length: monthHeatmapData.firstDayDow }).map((_, i) => (
+                <div key={`empty-${i}`} style={{ aspectRatio: '1/1', background: 'transparent' }} />
+              ))}
+              {monthHeatmapData.dailySpend.map((amount, index) => {
+                const dayOfMonth = index + 1;
+                let bgColor = '#2c2c2e'; 
+                if (amount > 0) {
+                  const ratio = amount / monthHeatmapData.maxSpend;
+                  if (ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
+                  else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
+                  else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
+                  else bgColor = '#ff453a';
+                }
+                
+                const isToday = new Date().getDate() === dayOfMonth && new Date().getMonth() === monthHeatmapData.month;
+                const isSelected = activeHeatmapDay === dayOfMonth;
+                
+                return (
+                  <div
+                    key={`day-modal-${dayOfMonth}`}
+                    onClick={() => setActiveHeatmapDay(dayOfMonth)}
+                    style={{
+                      aspectRatio: '1/1',
+                      background: bgColor,
+                      borderRadius: '6px',
+                      border: isSelected ? '2px solid #0a84ff' : isToday ? '1px solid rgba(255, 255, 255, 0.8)' : '1px solid rgba(255,255,255,0.05)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      color: amount > monthHeatmapData.maxSpend * 0.5 ? '#fff' : 'rgba(255,255,255,0.8)',
+                      fontWeight: isToday || isSelected ? 'bold' : 'normal',
+                      transform: isSelected ? 'scale(1.1)' : 'scale(1)',
+                      transition: 'all 0.2s ease',
+                      boxShadow: isSelected ? '0 4px 12px rgba(0,0,0,0.5)' : 'none',
+                      zIndex: isSelected ? 10 : 1
+                    }}
+                  >
+                    {dayOfMonth}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ marginTop: '24px', padding: '16px', background: '#111214', borderRadius: '16px', border: '1px solid #2c2c2e' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h4 style={{ margin: 0, fontSize: '15px' }}>
+                  {activeHeatmapDay ? `${activeHeatmapDay} ${getLocalizedMonthAcc(locale, monthHeatmapData.month)}` : ''}
+                </h4>
+                <strong style={{ fontSize: '16px' }}>
+                  {activeHeatmapDay ? monthHeatmapData.dailySpend[activeHeatmapDay - 1].toFixed(2) : '0.00'}€
+                </strong>
+              </div>
+              
+              {activeHeatmapDay && monthHeatmapData.dailyExpenses[activeHeatmapDay - 1].length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
+                  {monthHeatmapData.dailyExpenses[activeHeatmapDay - 1].map(exp => (
+                    <div key={exp.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ fontSize: '18px' }}>{exp.emoji}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontSize: '14px', fontWeight: '500' }}>{getLocalizedCategoryName(locale, exp.category)}</span>
+                          {exp.comment && <span style={{ fontSize: '12px', color: '#8e8e93' }}>{exp.comment}</span>}
+                        </div>
+                      </div>
+                      <strong style={{ fontSize: '14px' }}>{Number.parseFloat(exp.amount).toFixed(2)}€</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ margin: 0, fontSize: '14px', color: '#8e8e93', textAlign: 'center', padding: '16px 0' }}>
+                  {t(locale, 'noExpenses')}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Background Modal */}
       {backgroundModalOpen && (
         <div className="modal-backdrop" onClick={() => setBackgroundModalOpen(false)}>
