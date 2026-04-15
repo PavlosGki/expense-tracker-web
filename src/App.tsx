@@ -122,8 +122,9 @@ export default function App() {
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
-  const [analyticsModal, setAnalyticsModal] = useState<null | 'pace' | 'donut'>(null);
+  const [analyticsModal, setAnalyticsModal] = useState<null | 'pace' | 'donut' | 'heatmap'>(null);
   const [activeDonutSliceName, setActiveDonutSliceName] = useState<string | null>(null);
+  const [activeHeatmapDay, setActiveHeatmapDay] = useState<number | null>(null);
   const [categoryModalForExpense, setCategoryModalForExpense] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [isInitialSyncDone, setIsInitialSyncDone] = useState(false);
@@ -169,6 +170,11 @@ export default function App() {
   const [stickyShellHeight, setStickyShellHeight] = useState(0);
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
   const receiptInputRef = useRef<HTMLInputElement | null>(null);
+  const analyticsCarouselRef = useRef<HTMLDivElement | null>(null);
+  const isAnalyticsDraggingRef = useRef(false);
+  const analyticsStartXRef = useRef(0);
+  const analyticsScrollLeftRef = useRef(0);
+  const isClickPreventedRef = useRef(false);
 
   useEffect(() => {
     if (!supabase) {
@@ -619,18 +625,21 @@ export default function App() {
     const firstDayDow = (new Date(year, month, 1).getDay() + 6) % 7; 
     
     const dailySpend = new Array(daysInMonth).fill(0);
+    const dailyExpenses: Expense[][] = Array.from({ length: daysInMonth }, () => []);
     
     donutPeriodExpenses.forEach((exp) => {
       if (!exp.date) return;
       const expDate = parseIsoDateToLocal(exp.date);
       if (expDate.getFullYear() === year && expDate.getMonth() === month) {
-        dailySpend[expDate.getDate() - 1] += Number.parseFloat(exp.amount) || 0;
+        const dayIndex = expDate.getDate() - 1;
+        dailySpend[dayIndex] += Number.parseFloat(exp.amount) || 0;
+        dailyExpenses[dayIndex].push(exp);
       }
     });
     
     const maxSpend = Math.max(...dailySpend, 1);
     
-    return { daysInMonth, firstDayDow, dailySpend, maxSpend };
+    return { year, month, daysInMonth, firstDayDow, dailySpend, dailyExpenses, maxSpend };
   }, [range, donutPeriodExpenses]);
 
   const topCategories = useMemo(() => {
@@ -1477,7 +1486,48 @@ export default function App() {
 
         {tab === 'analytics' && (
           <>
-            <section className="analytics-hero-grid analytics-top-gap">
+            <section 
+              className="analytics-hero-grid analytics-top-gap"
+              ref={analyticsCarouselRef}
+              style={{ cursor: 'grab' }}
+              onMouseDown={(e) => {
+                if (!analyticsCarouselRef.current) return;
+                isAnalyticsDraggingRef.current = true;
+                isClickPreventedRef.current = false;
+                analyticsStartXRef.current = e.pageX - analyticsCarouselRef.current.offsetLeft;
+                analyticsScrollLeftRef.current = analyticsCarouselRef.current.scrollLeft;
+                analyticsCarouselRef.current.style.cursor = 'grabbing';
+                analyticsCarouselRef.current.style.scrollSnapType = 'none';
+              }}
+              onMouseLeave={() => {
+                isAnalyticsDraggingRef.current = false;
+                if (analyticsCarouselRef.current) {
+                  analyticsCarouselRef.current.style.cursor = 'grab';
+                  analyticsCarouselRef.current.style.scrollSnapType = 'x mandatory';
+                }
+              }}
+              onMouseUp={() => {
+                isAnalyticsDraggingRef.current = false;
+                if (analyticsCarouselRef.current) {
+                  analyticsCarouselRef.current.style.cursor = 'grab';
+                  analyticsCarouselRef.current.style.scrollSnapType = 'x mandatory';
+                }
+              }}
+              onMouseMove={(e) => {
+                if (!isAnalyticsDraggingRef.current || !analyticsCarouselRef.current) return;
+                e.preventDefault();
+                const x = e.pageX - analyticsCarouselRef.current.offsetLeft;
+                const walk = (x - analyticsStartXRef.current) * 1.5;
+                if (Math.abs(walk) > 5) isClickPreventedRef.current = true;
+                analyticsCarouselRef.current.scrollLeft = analyticsScrollLeftRef.current - walk;
+              }}
+              onClickCapture={(e) => {
+                if (isClickPreventedRef.current) {
+                  e.stopPropagation();
+                  e.preventDefault();
+                }
+              }}
+            >
               <article
                 className={`panel analytics-hero-card analytics-pace-card ${budgetPaceView.mode === 'chart' ? 'analytics-openable-card' : ''}`}
                 role={budgetPaceView.mode === 'chart' ? 'button' : undefined}
@@ -1603,7 +1653,15 @@ export default function App() {
               </article>
 
               {range === 'month' && monthHeatmapData && (
-                <article className="panel analytics-hero-card">
+                <article 
+                  className="panel analytics-hero-card analytics-openable-card"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setAnalyticsModal('heatmap');
+                    setActiveHeatmapDay(new Date().getDate());
+                  }}
+                >
                   <p className="panel-label">{t(locale, 'analyticsSpendingHeatmap')}</p>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', marginTop: '16px', textAlign: 'center', fontSize: '10px', color: '#8e8e93', marginBottom: '4px' }}>
                     {locale === 'el' ? ['Δ', 'Τ', 'Τ', 'Π', 'Π', 'Σ', 'Κ'].map((d, i) => <span key={i}>{d}</span>) : ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={i}>{d}</span>)}
