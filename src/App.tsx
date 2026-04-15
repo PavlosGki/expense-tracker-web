@@ -1486,6 +1486,22 @@ export default function App() {
 
         {tab === 'analytics' && (
           <>
+            <style>{`
+              .analytics-hero-grid::-webkit-scrollbar {
+                height: 6px;
+              }
+              .analytics-hero-grid::-webkit-scrollbar-track {
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 10px;
+              }
+              .analytics-hero-grid::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 10px;
+              }
+              .analytics-hero-grid {
+                padding-bottom: 12px !important;
+              }
+            `}</style>
             <section 
               className="analytics-hero-grid analytics-top-gap"
               ref={analyticsCarouselRef}
@@ -2360,7 +2376,7 @@ export default function App() {
 
       {analyticsModal === 'heatmap' && monthHeatmapData && (
         <div className="modal-backdrop" onClick={() => setAnalyticsModal(null)}>
-          <div className="modal-card analytics-modal-card" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-card analytics-modal-card" style={{ maxWidth: '400px', margin: 'auto', left: 0, right: 0 }} onClick={(event) => event.stopPropagation()}>
             <div className="analytics-modal-header">
               <h3>{t(locale, 'analyticsSpendingHeatmap')}</h3>
               <button className="ghost-btn" onClick={() => setAnalyticsModal(null)}>
@@ -2417,7 +2433,7 @@ export default function App() {
               })}
             </div>
 
-            <div style={{ marginTop: '24px', padding: '16px', background: '#111214', borderRadius: '16px', border: '1px solid #2c2c2e' }}>
+            <div style={{ marginTop: '24px', padding: '16px', background: '#111214', borderRadius: '16px', border: '1px solid #2c2c2e', height: '260px', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <h4 style={{ margin: 0, fontSize: '15px' }}>
                   {activeHeatmapDay ? `${activeHeatmapDay} ${getLocalizedMonthAcc(locale, monthHeatmapData.month)}` : ''}
@@ -2428,7 +2444,7 @@ export default function App() {
               </div>
               
               {activeHeatmapDay && monthHeatmapData.dailyExpenses[activeHeatmapDay - 1].length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '220px', overflowY: 'auto' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
                   {monthHeatmapData.dailyExpenses[activeHeatmapDay - 1].map(exp => (
                     <div key={exp.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -2443,7 +2459,7 @@ export default function App() {
                   ))}
                 </div>
               ) : (
-                <p style={{ margin: 0, fontSize: '14px', color: '#8e8e93', textAlign: 'center', padding: '16px 0' }}>
+                <p style={{ margin: 'auto', fontSize: '14px', color: '#8e8e93', textAlign: 'center' }}>
                   {t(locale, 'noExpenses')}
                 </p>
               )}
