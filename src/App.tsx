@@ -49,7 +49,7 @@ import {
   WITHOUT_PROJECT_VALUE,
 } from './config/appConstants';
 import { useBudgetPace } from './hooks/useBudgetPace';
-import { useAnalyticsInsight } from './hooks/useAnalyticsInsight';
+import { useAnalyticsInsights } from './hooks/useAnalyticsInsight';
 import './styles.css';
 import type { Category, Expense, Locale, Project, Range, TabId } from './types';
 
@@ -170,6 +170,9 @@ export default function App() {
   const [editingCategoryName, setEditingCategoryName] = useState('');
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportFromDate, setExportFromDate] = useState('');
+  const [exportToDate, setExportToDate] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -210,6 +213,7 @@ export default function App() {
   const analyticsCarouselRef = useRef<HTMLDivElement | null>(null);
   const [activeAnalyticsSlide, setActiveAnalyticsSlide] = useState(0);
   const isAnalyticsDraggingRef = useRef(false);
+  const [activeInsightIndex, setActiveInsightIndex] = useState(0);
   const analyticsStartXRef = useRef(0);
   const analyticsScrollLeftRef = useRef(0);
   const isClickPreventedRef = useRef(false);
@@ -548,23 +552,6 @@ export default function App() {
     return currentMonthSpend - expectedSpend;
   }, [currentMonthSpend, parsedIncome]);
 
-  const homeSmartAdvice = useMemo(() => {
-    if (parsedIncome > 0) {
-      if (progressPct >= 90) {
-        return { icon: '🚨', text: t(locale, 'adviceAlmostEmpty').replace('{pct}', progressPct.toFixed(0)), color: 'rgba(255, 69, 58, 0.15)', textColor: '#ff453a' };
-      }
-      if (homeMonthPace > 0) {
-        return { icon: '⚠️', text: t(locale, 'adviceOverPace'), color: 'rgba(255, 159, 10, 0.15)', textColor: '#ff9f0a' };
-      }
-      if (homeMonthPace < -parsedIncome * 0.1) {
-        return { icon: '🌱', text: t(locale, 'adviceGoodPace'), color: 'rgba(50, 215, 75, 0.15)', textColor: '#32d74b' };
-      }
-    }
-    const tips = ['adviceExpert1', 'adviceExpert2', 'adviceExpert3'];
-    const dayIndex = new Date().getDate() % tips.length;
-    return { icon: '💡', text: t(locale, tips[dayIndex]), color: 'rgba(255, 255, 255, 0.05)', textColor: '#fff' };
-  }, [progressPct, homeMonthPace, parsedIncome, locale]);
-
   const isYearOffTrack = useMemo(() => {
     const currentMonthNum = new Date().getMonth() + 1;
     const expectedYearlyPct = (currentMonthNum / 12) * 100;
@@ -595,13 +582,21 @@ export default function App() {
   const budgetPaceTarget = budgetPaceView.target;
   const budgetPaceActual = budgetPaceView.actual;
   const budgetPaceDelta = budgetPaceView.delta;
-  const budgetPaceDayMax = Math.max(budgetPaceActual, budgetPaceTarget, 1);
-  const insight = useAnalyticsInsight(
+  const allInsights = useAnalyticsInsights(
+    expenses,
     donutPeriodExpenses,
     budgetPaceView,
     range,
-    locale
+    locale,
+    projects,
+    parsedIncome,
+    isYearOffTrack
   );
+  const displayInsight = allInsights[activeInsightIndex] ?? {
+    icon: '💡',
+    text: t(locale, 'tip1'),
+    color: 'gray',
+  };
   const insightColors: Record<string, string> = {
     blue: 'linear-gradient(135deg, #0a84ff 0%, #0074e8 100%)',
     green: 'linear-gradient(135deg, #32d74b 0%, #30c157 100%)',
@@ -609,13 +604,7 @@ export default function App() {
     yellow: 'linear-gradient(135deg, #ffd60a 0%, #ffc700 100%)',
     gray: 'rgba(255, 255, 255, 0.08)',
   };
-
-  const randomTipIndex = useMemo(() => Math.floor(Math.random() * 5) + 1, [range]);
-  const displayInsight = insight || {
-    icon: '💡',
-    text: t(locale, `tip${randomTipIndex}`),
-    color: 'gray',
-  };
+  const budgetPaceDayMax = Math.max(budgetPaceActual, budgetPaceTarget, 1);
 
   const budgetPaceDayActualPct = (budgetPaceActual / budgetPaceDayMax) * 100;
   const budgetPaceDayTargetPct = (budgetPaceTarget / budgetPaceDayMax) * 100;
@@ -1210,7 +1199,18 @@ export default function App() {
   };
 
   const handleExportCsv = () => {
-    downloadCsv(buildCsv(expenses, locale));
+    let toExport = expenses;
+    if (exportFromDate || exportToDate) {
+      const from = exportFromDate ? parseIsoDateToLocal(exportFromDate) : null;
+      const to = exportToDate ? parseIsoDateToLocal(exportToDate) : null;
+      toExport = filterExpensesByDateRange(expenses, from, to);
+    }
+    if (toExport.length === 0) {
+      window.alert(t(locale, 'noExpenses'));
+      return;
+    }
+    downloadCsv(buildCsv(toExport, locale));
+    setExportModalOpen(false);
   };
 
   const handleImportClick = () => {
@@ -1327,7 +1327,7 @@ export default function App() {
 
   const showDashboard = tab !== 'settings';
   const isAnyModalOpen =
-    expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen || analyticsModal !== null;
+    expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen || exportModalOpen || analyticsModal !== null;
 
   const handleGoogleSignIn = async () => {
     if (!supabase) return;
@@ -1568,6 +1568,15 @@ export default function App() {
 
         {showDashboard && tab === 'analytics' && (
           <>
+            <style>{`
+              @keyframes insightFadeIn {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+              }
+              .insight-banner {
+                animation: insightFadeIn 0.35s ease-out forwards;
+              }
+            `}</style>
             <section className="range-scroll-row">
               {RANGE_OPTIONS.map((option) => (
                 <button
@@ -1584,17 +1593,25 @@ export default function App() {
               style={{
                 background: insightColors[displayInsight.color],
                 borderRadius: '12px',
-                padding: '8px 14px',
+                  padding: '12px 16px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '10px',
+                  gap: '12px',
                 boxShadow: displayInsight.color === 'gray' ? 'none' : '0 4px 12px rgba(0, 0, 0, 0.15)',
                 marginTop: '10px',
-                transition: 'background 0.3s ease'
+                  transition: 'all 0.3s ease',
+                  minHeight: '54px',
+                  cursor: 'pointer',
+                  userSelect: 'none',
               }}
+                onClick={() => {
+                  setActiveInsightIndex(prev => (prev + 1) % allInsights.length);
+                }}
+                key={activeInsightIndex}
+                className="insight-banner"
             >
-              <div style={{ fontSize: '18px', filter: displayInsight.color === 'gray' ? 'none' : 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }}>{displayInsight.icon}</div>
-              <div style={{ fontSize: '13px', color: displayInsight.color === 'yellow' ? 'rgba(0,0,0,0.8)' : displayInsight.color === 'gray' ? '#d1d1d6' : '#fff', fontWeight: '500' }}>
+              <div style={{ fontSize: '24px', filter: displayInsight.color === 'gray' ? 'none' : 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }}>{displayInsight.icon}</div>
+              <div style={{ fontSize: '13.5px', lineHeight: 1.4, color: displayInsight.color === 'yellow' ? 'rgba(0,0,0,0.8)' : displayInsight.color === 'gray' ? '#d1d1d6' : '#fff', fontWeight: '500' }}>
                 <span dangerouslySetInnerHTML={{ __html: displayInsight.text }} />
               </div>
             </section>
@@ -1605,27 +1622,6 @@ export default function App() {
       <main className="main-grid" style={{ marginTop: tab === 'home' ? '4px' : undefined }}>
         {showDashboard && (
           <>
-            {tab === 'home' && (
-              <section 
-                style={{
-                  background: homeSmartAdvice.color,
-                  border: `1px solid ${homeSmartAdvice.textColor}20`,
-                  borderRadius: '12px',
-                  padding: '12px 16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                  animation: 'fadeSlideUp 0.35s ease-out forwards'
-                }}
-              >
-                <div style={{ fontSize: '24px', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.2))' }}>{homeSmartAdvice.icon}</div>
-                <div style={{ fontSize: '13.5px', color: homeSmartAdvice.textColor, fontWeight: '500', lineHeight: '1.4' }}>
-                  {homeSmartAdvice.text}
-                </div>
-              </section>
-            )}
-
             {tab === 'home' && (
               <section className="summary-grid">
                 {RANGE_OPTIONS.map((option) => (
@@ -2466,7 +2462,7 @@ export default function App() {
                   <strong>{t(locale, 'importCsv')}</strong>
                   <span>{t(locale, 'importCsvDesc')}</span>
                 </button>
-                <button className="settings-card" onClick={handleExportCsv}>
+        <button className="settings-card" onClick={() => setExportModalOpen(true)}>
                   <strong>{t(locale, 'exportCsv')}</strong>
                   <span>{t(locale, 'exportCsvDesc')}</span>
                 </button>
@@ -3501,6 +3497,55 @@ export default function App() {
               </button>
               <button className="primary-btn" onClick={() => setFilterModalOpen(false)}>
                 {t(locale, 'apply')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {exportModalOpen && (
+        <div className="modal-backdrop" onClick={() => setExportModalOpen(false)}>
+          <div className="modal-card filter-modal" onClick={(event) => event.stopPropagation()}>
+            <h3>{t(locale, 'exportCsv')}</h3>
+            <p style={{ marginBottom: '16px', color: '#8e8e93', fontSize: '14px' }}>
+              {t(locale, 'exportCsvDesc')}
+            </p>
+            <div className="filter-fields">
+              <label>
+                <span>{t(locale, 'from')}</span>
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                  <input 
+                    type="date"
+                    value={exportFromDate} 
+                    onChange={(event) => setExportFromDate(event.target.value)} 
+                  />
+                </div>
+              </label>
+              <label>
+                <span>{t(locale, 'to')}</span>
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                  <input 
+                    type="date"
+                    value={exportToDate} 
+                    onChange={(event) => setExportToDate(event.target.value)} 
+                  />
+                </div>
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button
+                className="ghost-btn"
+                onClick={() => {
+                  setExportFromDate('');
+                  setExportToDate('');
+                }}
+              >
+                {t(locale, 'clear')}
+              </button>
+              <button className="primary-btn" onClick={handleExportCsv}>
+                {t(locale, 'exportCsv')}
               </button>
             </div>
           </div>
