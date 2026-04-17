@@ -541,9 +541,15 @@ export default function App() {
   const parsedIncome = Number(income) || 0;
   const parsedYearly = Number(yearlyBudget) || 0;
   const currentMonthSpend = totals.month;
-  const progressPct = parsedIncome > 0 ? Math.min(100, Math.max(0, (currentMonthSpend / parsedIncome) * 100)) : 0;
+  const actualProgressPct = parsedIncome > 0 ? (currentMonthSpend / parsedIncome) * 100 : 0;
+  const visualProgressPct = Math.min(100, Math.max(0, actualProgressPct));
+  const isMonthOverBudget = currentMonthSpend > parsedIncome;
+  const monthOverage = currentMonthSpend - parsedIncome;
   const hasActiveFilter = Boolean(fromDate || toDate || categoryFilter || projectFilter);
-  const yearlyProgressPct = parsedYearly > 0 ? Math.min(100, Math.max(0, (totals.year / parsedYearly) * 100)) : 0;
+  const actualYearlyProgressPct = parsedYearly > 0 ? (totals.year / parsedYearly) * 100 : 0;
+  const visualYearlyProgressPct = Math.min(100, Math.max(0, actualYearlyProgressPct));
+  const isYearOverBudget = totals.year > parsedYearly;
+  const yearOverage = totals.year - parsedYearly;
 
   const homeMonthPace = useMemo(() => {
     const today = new Date();
@@ -556,8 +562,8 @@ export default function App() {
   const isYearOffTrack = useMemo(() => {
     const currentMonthNum = new Date().getMonth() + 1;
     const expectedYearlyPct = (currentMonthNum / 12) * 100;
-    return yearlyProgressPct > expectedYearlyPct;
-  }, [yearlyProgressPct]);
+    return actualYearlyProgressPct > expectedYearlyPct;
+  }, [actualYearlyProgressPct]);
 
   const donutPeriodExpenses = useMemo(() => {
     const todayIso = toLocalIsoDate(new Date());
@@ -1526,15 +1532,15 @@ export default function App() {
                 <div className="budget-bar-wrap">
                   <strong className="budget-spent-value">{currentMonthSpend.toFixed(2)} €</strong>
                   <div className="progress-track budget-track">
-                    <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - progressPct)}%` }} />
+                    <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - visualProgressPct)}%` }} />
                   </div>
                   <strong className="budget-bar-value">{parsedIncome.toFixed(2)} €</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
-                  <p className="budget-consumed" style={{ margin: 0 }}>{progressPct.toFixed(0)}% κατανάλωση</p>
+                  <p className="budget-consumed" style={{ margin: 0, color: actualProgressPct > 100 ? '#ff453a' : '#8e8e93' }}>{actualProgressPct.toFixed(0)}% κατανάλωση</p>
                   {parsedIncome > 0 && (
-                    <span style={{ fontSize: '11px', fontWeight: '700', padding: '4px 8px', borderRadius: '6px', background: homeMonthPace > 0 ? 'rgba(255,69,58,0.2)' : noSpendDaysThisMonth > 0 ? 'rgba(255,159,10,0.2)' : 'rgba(50,215,75,0.2)', color: homeMonthPace > 0 ? '#ff453a' : noSpendDaysThisMonth > 0 ? '#ff9f0a' : '#32d74b' }}>
-                      {homeMonthPace > 0 ? t(locale, 'badgeOverPace') : noSpendDaysThisMonth > 0 ? t(locale, 'badgeNoSpend').replace('{n}', String(noSpendDaysThisMonth)) : t(locale, 'badgeGoodPace')}
+                    <span style={{ fontSize: '11px', fontWeight: '700', padding: '4px 8px', borderRadius: '6px', background: isMonthOverBudget ? 'rgba(255,69,58,0.2)' : homeMonthPace > 0 ? 'rgba(255,159,10,0.2)' : noSpendDaysThisMonth > 0 ? 'rgba(10,132,255,0.2)' : 'rgba(50,215,75,0.2)', color: isMonthOverBudget ? '#ff453a' : homeMonthPace > 0 ? '#ff9f0a' : noSpendDaysThisMonth > 0 ? '#0a84ff' : '#32d74b' }}>
+                      {isMonthOverBudget ? `⚠️ ${t(locale, 'analyticsOverBy')}: ${monthOverage.toFixed(0)}€` : homeMonthPace > 0 ? t(locale, 'badgeOverPace') : noSpendDaysThisMonth > 0 ? t(locale, 'badgeNoSpend').replace('{n}', String(noSpendDaysThisMonth)) : t(locale, 'badgeGoodPace')}
                     </span>
                   )}
                 </div>
@@ -1545,15 +1551,15 @@ export default function App() {
                 <div className="budget-bar-wrap">
                   <strong className="budget-spent-value">{totals.year.toFixed(2)} €</strong>
                   <div className="progress-track budget-track">
-                    <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - yearlyProgressPct)}%` }} />
+                    <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - visualYearlyProgressPct)}%` }} />
                   </div>
                   <strong className="budget-bar-value">{parsedYearly.toFixed(2)} €</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
-                  <p className="budget-consumed" style={{ margin: 0 }}>{yearlyProgressPct.toFixed(0)}% κατανάλωση</p>
+                  <p className="budget-consumed" style={{ margin: 0, color: actualYearlyProgressPct > 100 ? '#ff453a' : '#8e8e93' }}>{actualYearlyProgressPct.toFixed(0)}% κατανάλωση</p>
                   {parsedYearly > 0 && (
-                    <span style={{ fontSize: '11px', fontWeight: '700', padding: '4px 8px', borderRadius: '6px', background: isYearOffTrack ? 'rgba(255,69,58,0.2)' : 'rgba(50,215,75,0.2)', color: isYearOffTrack ? '#ff453a' : '#32d74b' }}>
-                      {isYearOffTrack ? t(locale, 'badgeYearOffTrack') : t(locale, 'badgeYearOnTrack')}
+                    <span style={{ fontSize: '11px', fontWeight: '700', padding: '4px 8px', borderRadius: '6px', background: isYearOverBudget ? 'rgba(255,69,58,0.2)' : isYearOffTrack ? 'rgba(255,159,10,0.2)' : 'rgba(50,215,75,0.2)', color: isYearOverBudget ? '#ff453a' : isYearOffTrack ? '#ff9f0a' : '#32d74b' }}>
+                      {isYearOverBudget ? `⚠️ ${t(locale, 'analyticsOverBy')}: ${yearOverage.toFixed(0)}€` : isYearOffTrack ? t(locale, 'badgeYearOffTrack') : t(locale, 'badgeYearOnTrack')}
                     </span>
                   )}
                 </div>
@@ -2865,7 +2871,7 @@ export default function App() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', marginTop: '16px', textAlign: 'center', fontSize: '12px', color: '#8e8e93', marginBottom: '8px' }}>
               {locale === 'el' ? ['Δ', 'Τ', 'Τ', 'Π', 'Π', 'Σ', 'Κ'].map((d, i) => <span key={i}>{d}</span>) : ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={i}>{d}</span>)}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gridTemplateRows: 'repeat(6, 1fr)', gap: '6px' }}>
               {Array.from({ length: monthHeatmapData.firstDayDow }).map((_, i) => (
                 <div key={`empty-${i}`} style={{ aspectRatio: '1/1', background: 'transparent' }} />
               ))}
@@ -2909,6 +2915,9 @@ export default function App() {
                   </div>
                 );
               })}
+              {Array.from({ length: 42 - (monthHeatmapData.firstDayDow + monthHeatmapData.daysInMonth) }).map((_, i) => (
+                <div key={`empty-end-${i}`} style={{ aspectRatio: '1/1', background: 'transparent' }} />
+              ))}
             </div>
 
             <div className="heatmap-card-legend" style={{ justifyContent: 'center', marginTop: '16px', marginBottom: '4px' }}>
