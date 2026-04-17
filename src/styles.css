@@ -1597,8 +1597,7 @@ select:focus-visible {
     align-items: stretch;
   }
 
-  .settings-grid,
-  .grid-two {
+  .settings-grid {
     grid-template-columns: 1fr;
   }
 

@@ -171,9 +171,15 @@ export default function App() {
   const [editingCategoryName, setEditingCategoryName] = useState('');
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
+  const [importModalOpen, setImportModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportFromDate, setExportFromDate] = useState('');
   const [exportToDate, setExportToDate] = useState('');
+  const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false);
+  const [bdFromDate, setBdFromDate] = useState('');
+  const [bdToDate, setBdToDate] = useState('');
+  const [bdCategory, setBdCategory] = useState('');
+  const [bdProject, setBdProject] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -218,6 +224,7 @@ export default function App() {
   const analyticsStartXRef = useRef(0);
   const analyticsScrollLeftRef = useRef(0);
   const isClickPreventedRef = useRef(false);
+  const donutListRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -381,8 +388,8 @@ export default function App() {
       setIsInitialSyncDone(true);
     }
 
-    if (user) syncCloudData();
-  }, [user]);
+    if (user?.id) syncCloudData();
+  }, [user?.id]);
 
   // Monthly Wrapped Logic (Μηνιαία Ανασκόπηση)
   useEffect(() => {
@@ -435,9 +442,9 @@ export default function App() {
     setYearlyBudgetInputValue(String(yearlyBudget));
   }, [yearlyBudget]);
 
-  // Συγχρονισμός Locale & Background όταν αλλάζουν
+  // Συγχρονισμός Προφίλ στο Cloud όταν αλλάζουν βασικές ρυθμίσεις
   useEffect(() => {
-    if (user && supabase && isInitialSyncDone) {
+    if (user?.id && supabase && isInitialSyncDone) {
       supabase.from('profiles').upsert({ 
         id: user.id, 
         income, 
@@ -447,7 +454,7 @@ export default function App() {
         updated_at: new Date().toISOString()
       });
     }
-  }, [locale, background, user, isInitialSyncDone]);
+  }, [income, yearlyBudget, locale, background, user?.id, isInitialSyncDone]);
 
   useEffect(() => {
     setBudgetInputValue(String(income));
@@ -731,6 +738,18 @@ export default function App() {
       setActiveDonutSliceName(donutInteractiveSlices[0].name);
     }
   }, [donutInteractiveSlices, activeDonutSliceName]);
+  useEffect(() => {
+    if (analyticsModal === 'donut' && activeDonutSliceName && donutListRef.current) {
+      const activeIndex = categoryDonut.slices.findIndex(s => s.name === activeDonutSliceName);
+      if (activeIndex !== -1) {
+        const activeEl = document.getElementById(`donut-slice-${activeIndex}`);
+        if (activeEl) {
+          activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      }
+    }
+  }, [activeDonutSliceName, analyticsModal, categoryDonut.slices]);
+
   useEffect(() => {
     if (analyticsModal === 'pace' && budgetPaceView.mode !== 'chart') {
       setAnalyticsModal(null);
@@ -1225,8 +1244,50 @@ export default function App() {
     setExportModalOpen(false);
   };
 
+  const expensesToDelete = useMemo(() => {
+    let filtered = expenses;
+    if (bdCategory) {
+      filtered = filtered.filter((e) => e.category === bdCategory);
+    }
+    if (bdProject === WITHOUT_PROJECT_VALUE) {
+      filtered = filtered.filter((e) => !e.project);
+    } else if (bdProject) {
+      filtered = filtered.filter((e) => (e.project ?? '') === bdProject);
+    }
+    if (bdFromDate || bdToDate) {
+      const from = bdFromDate ? parseIsoDateToLocal(bdFromDate) : null;
+      const to = bdToDate ? parseIsoDateToLocal(bdToDate) : null;
+      filtered = filterExpensesByDateRange(filtered, from, to);
+    }
+    return filtered;
+  }, [expenses, bdFromDate, bdToDate, bdCategory, bdProject]);
+
+  const handleBulkDelete = async () => {
+    if (expensesToDelete.length === 0) return;
+    const msg = t(locale, 'bulkDeleteConfirmMsg').replace('{n}', String(expensesToDelete.length));
+    if (!window.confirm(msg)) return;
+
+    const idsToDelete = expensesToDelete.map((e) => e.id);
+    setExpenses((prev) => prev.filter((e) => !idsToDelete.includes(e.id)));
+
+    if (user && supabase) {
+      const chunkSize = 200;
+      for (let i = 0; i < idsToDelete.length; i += chunkSize) {
+        const chunk = idsToDelete.slice(i, i + chunkSize);
+        const { error } = await supabase.from('expenses').delete().in('id', chunk);
+        if (error) console.error('Error bulk deleting from cloud:', error);
+      }
+    }
+
+    setBulkDeleteModalOpen(false);
+    setBdFromDate('');
+    setBdToDate('');
+    setBdCategory('');
+    setBdProject('');
+  };
+
   const handleImportClick = () => {
-    importInputRef.current?.click();
+    setImportModalOpen(true);
   };
 
   const handleImportCsv = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1239,28 +1300,92 @@ export default function App() {
       return;
     }
 
-    const header = rows[0].map((value) => value.trim().toLowerCase());
-    const dateIndex = header.findIndex((value) => value === 'ημερομηνία' || value === 'date');
-    const projectIndex = header.findIndex((value) => value === 'project');
-    const categoryIndex = header.findIndex((value) => value === 'κατηγορία' || value === 'category');
-    const amountIndex = header.findIndex((value) => value === 'ποσό' || value === 'amount');
+    // Αφαίρεση τόνων για πιο εύκολο matching ("ΠΟΣΟ" -> "ποσο")
+    const normalizeStr = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const header = rows[0].map((value) => normalizeStr(value.replace(/"/g, '').trim()));
 
-    if (dateIndex === -1 || categoryIndex === -1 || amountIndex === -1) {
+    // Έξυπνη εύρεση στηλών (αγνοούμε το Υπόλοιπο, την Ημ. Αξίας κλπ)
+    const dateIndex = header.findIndex((v) => v.includes('ημερομηνια') || v.includes('ημ/νια') || v === 'date');
+    const projectIndex = header.findIndex((v) => v === 'project');
+    const descIndex = header.findIndex((v) => v.includes('κατηγορια') || v.includes('category') || v.includes('περιγραφη') || v.includes('description') || v.includes('αιτιολογια'));
+    const amountIndex = header.findIndex((v) => v.includes('ποσο') || v.includes('amount'));
+
+    if (dateIndex === -1 || descIndex === -1 || amountIndex === -1) {
       window.alert(t(locale, 'invalidCsv'));
       return;
     }
 
+    // Καταλαβαίνουμε αν είναι export τράπεζας (οπότε η στήλη έχει "Περιγραφή" και όχι έτοιμη Κατηγορία)
+    const isBankExport = header[descIndex].includes('περιγραφ') || header[descIndex].includes('description') || header[descIndex].includes('αιτιολογ');
+
+    // ΛΕΞΙΚΟ ΕΞΥΠΝΩΝ ΚΑΝΟΝΩΝ (Λύση Β)
+    const BANK_CATEGORY_RULES: Record<string, string[]> = {
+      'Σούπερ Μάρκετ': ['lidl', 'ab food', 'sklavenitis', 'my market', 'masoutis', 'bazaar', 'galaxias', 'market in'],
+      'Φαγητό': ['efood', 'wolt', 'box', 'pizza', 'burger', 'grill', 'gyros', 'souvlaki', 'food', 'bakery', 'choux', 'the bitt', 'pagkalos'],
+      'Καφές': ['coffee', 'mikel', 'gregorys', 'starbucks', 'coffee island', 'everest'],
+      'Καύσιμα': ['shell', 'eko', 'bp', 'aegean', 'revoil', 'elin', 'petrol'],
+      'Διόδια': ['diodia', 'olympia odos', 'nea odos', 'gefyra', 'attiki odos', 'egnatia', 'kentriki odos'],
+      'Λογαριασμοί': ['cosmote', 'vodafone', 'nova', 'dei', 'eydap', 'protergia', 'heron', 'zenith', 'elta'],
+      'Φαρμακείο': ['farmakeio', 'pharmacy', 'φαρμακειο'],
+      'Ηλεκτρονικά': ['skroutz', 'plaisio', 'public', 'kotsovolos', 'germanos'],
+      'Ταξίδια': ['hotel', 'airbnb', 'booking', 'aegean airlines', 'sky express', 'ryanair', 'ferries'],
+      'Τράπεζα': ['eurobank', 'alpha bank', 'piraeus', 'national bank', 'ethniki', 'viva', 'paypal', 'revolut']
+    };
+
     const importedExpenses: Expense[] = [];
     const newCategories: Category[] = [];
     const existingNames = new Set(allCategories.map((category) => category.name));
+    const otherCategoryName = locale === 'el' ? 'Άλλο' : 'Other';
 
     rows.slice(1).forEach((row, index) => {
-      const date = (row[dateIndex] ?? '').trim();
-      const project = projectIndex === -1 ? '' : (row[projectIndex] ?? '').trim();
-      const category = (row[categoryIndex] ?? '').trim();
-      const amountRaw = (row[amountIndex] ?? '').trim().replace(',', '.');
-      const amount = Number.parseFloat(amountRaw);
-      if (!date || !category || Number.isNaN(amount)) return;
+      if (!row[dateIndex] || !row[amountIndex] || !row[descIndex]) return;
+
+      // 1. Καθαρισμός Ημερομηνίας (Υποστηρίζει DD/MM/YYYY και αγνοεί σκουπίδια)
+      const rawDate = row[dateIndex].replace(/"/g, '').trim();
+      if (!rawDate) return;
+      let date = rawDate;
+      if (rawDate.includes('/')) {
+          const parts = rawDate.split('/');
+          if (parts.length === 3) {
+              date = `${parts[2].length === 2 ? '20'+parts[2] : parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+          }
+      }
+      // Αν δεν είναι σωστή ημερομηνία, αγνοούμε εντελώς τη γραμμή (π.χ. "ΑΡΙΘΜΟΣ ΛΟΓΑΡΙΑΣΜΟΥ")
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+
+      // 2. Καθαρισμός Ποσού (-40,01 -> 40.01)
+      let rawAmount = row[amountIndex].replace(/"/g, '').trim();
+      if (rawAmount.includes(',') && rawAmount.includes('.')) {
+           const lastComma = rawAmount.lastIndexOf(',');
+           const lastDot = rawAmount.lastIndexOf('.');
+           rawAmount = lastComma > lastDot ? rawAmount.replace(/\./g, '').replace(',', '.') : rawAmount.replace(/,/g, '');
+      } else if (rawAmount.includes(',')) {
+           rawAmount = rawAmount.replace(',', '.');
+      }
+      
+      const amount = Number.parseFloat(rawAmount);
+      if (Number.isNaN(amount) || amount === 0) return;
+      const finalAmount = Math.abs(amount); // Κρατάμε την απόλυτη τιμή (αγνοούμε το πλην της τράπεζας)
+
+      // 3. Εξαγωγή Περιγραφής / Κατηγορίας
+      const desc = row[descIndex].replace(/"/g, '').trim();
+      let category = desc;
+      let comment = '';
+
+      if (isBankExport) {
+          comment = desc;
+          category = otherCategoryName;
+          const dLow = normalizeStr(desc);
+          
+          for (const [catName, keywords] of Object.entries(BANK_CATEGORY_RULES)) {
+              if (keywords.some(keyword => dLow.includes(normalizeStr(keyword)))) {
+                  category = catName;
+                  break;
+              }
+          }
+      }
+
+      const project = projectIndex === -1 ? '' : (row[projectIndex] ?? '').replace(/"/g, '').trim();
 
       if (!existingNames.has(category)) {
         existingNames.add(category);
@@ -1273,10 +1398,11 @@ export default function App() {
 
       importedExpenses.push({
         id: `import_${Date.now()}_${index}`,
-        amount: amount.toFixed(2),
+        amount: finalAmount.toFixed(2),
         category,
         emoji: allCategories.find((item) => item.name === category)?.emoji ?? '🏷️',
         date,
+        comment,
         project: project || undefined,
       });
     });
@@ -1296,6 +1422,7 @@ export default function App() {
     setExpenses((prev) => [...importedExpenses, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
     event.target.value = '';
     window.alert(t(locale, 'importDone'));
+    setImportModalOpen(false);
   };
 
   const handleReceiptUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1339,7 +1466,7 @@ export default function App() {
 
   const showDashboard = tab !== 'settings';
   const isAnyModalOpen =
-    expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen || exportModalOpen || analyticsModal !== null;
+    expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen || exportModalOpen || importModalOpen || bulkDeleteModalOpen || analyticsModal !== null;
 
   const handleGoogleSignIn = async () => {
     if (!supabase) return;
@@ -1363,17 +1490,6 @@ export default function App() {
     const finalYearly = Number(yearlyBudgetInputValue) || 0;
     setIncome(finalIncome);
     setYearlyBudget(finalYearly);
-    if (user && supabase) {
-      const { error } = await supabase.from('profiles').upsert({ 
-        id: user.id, 
-        income: finalIncome, 
-        yearly_budget: finalYearly,
-        locale, 
-        background,
-        updated_at: new Date().toISOString()
-      });
-      if (error) console.error('Budget sync error:', error);
-    }
   };
 
   const handleDeleteReceipt = async () => {
@@ -2480,6 +2596,10 @@ export default function App() {
                   <strong>{t(locale, 'exportCsv')}</strong>
                   <span>{t(locale, 'exportCsvDesc')}</span>
                 </button>
+                <button className="settings-card" onClick={() => setBulkDeleteModalOpen(true)}>
+                  <strong style={{ color: '#ff453a' }}>{t(locale, 'bulkDelete')}</strong>
+                  <span>{t(locale, 'bulkDeleteDesc')}</span>
+                </button>
               </div>
             </section>
             <section className="panel">
@@ -2812,13 +2932,41 @@ export default function App() {
                 </svg>
               </div>
 
-              <div className="analytics-donut-modal-side">
-                {activeDonutSlice ? (
-                  <div className="analytics-slice-details">
-                    <strong>{activeDonutSlice.emoji} {activeDonutSlice.name}</strong>
-                    <p>{t(locale, 'analyticsAmount')}: {activeDonutSlice.amount.toFixed(2)}€</p>
-                    <p>{t(locale, 'analyticsShare')}: {activeDonutSlice.pct.toFixed(1)}%</p>
-                  </div>
+              <div className="analytics-donut-modal-side" ref={donutListRef} style={{ maxHeight: '320px', overflowY: 'auto', paddingRight: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {categoryDonut.slices.length > 0 ? (
+                  categoryDonut.slices.map((slice, index) => {
+                    const isActive = activeDonutSliceName === slice.name;
+                    return (
+                      <div
+                        key={slice.name}
+                        id={`donut-slice-${index}`}
+                        onClick={() => setActiveDonutSliceName(slice.name)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '12px',
+                          background: isActive ? 'rgba(10, 132, 255, 0.1)' : '#0e0f12',
+                          border: `1px solid ${isActive ? '#0a84ff' : '#2c2c2e'}`,
+                          borderRadius: '12px',
+                          cursor: 'pointer',
+                          boxShadow: isActive ? '0 0 0 2px rgba(10, 132, 255, 0.2)' : 'none',
+                          transition: 'all 0.2s ease',
+                          flexShrink: 0
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: slice.color, flexShrink: 0 }} />
+                          <span style={{ fontSize: '20px' }}>{slice.emoji}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <strong style={{ fontSize: '15px', color: isActive ? '#fff' : '#e5e5ea', lineHeight: '1.2' }}>{slice.name}</strong>
+                            <span style={{ fontSize: '13px', color: '#8e8e93', lineHeight: '1.2' }}>{slice.pct.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                        <strong style={{ fontSize: '16px', color: isActive ? '#fff' : '#f5f5f7' }}>{slice.amount.toFixed(2)}€</strong>
+                      </div>
+                    );
+                  })
                 ) : (
                   <p className="analytics-empty-note">{t(locale, 'analyticsNoDataInPeriod')}</p>
                 )}
@@ -3389,6 +3537,139 @@ export default function App() {
               </button>
               <button className="primary-btn" onClick={handleExportCsv}>
                 {t(locale, 'exportCsv')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importModalOpen && (
+        <div className="modal-backdrop" onClick={() => setImportModalOpen(false)}>
+          <div className="modal-card filter-modal" onClick={(event) => event.stopPropagation()}>
+            <h3>{t(locale, 'importInstructionsTitle')}</h3>
+            <p style={{ marginTop: '8px', marginBottom: '16px', color: '#8e8e93', fontSize: '14px', lineHeight: '1.5' }}>
+              {t(locale, 'importInstructionsDesc')}
+            </p>
+            <ul style={{ margin: '0 0 20px 20px', padding: 0, color: '#f5f5f7', fontSize: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <li><strong>1.</strong> {t(locale, 'importFormatColDate')}</li>
+              <li><strong>2.</strong> {t(locale, 'importFormatColProject')}</li>
+              <li><strong>3.</strong> {t(locale, 'importFormatColCategory')}</li>
+              <li><strong>4.</strong> {t(locale, 'importFormatColAmount')}</li>
+            </ul>
+            <p style={{ marginTop: '0', marginBottom: '24px', color: '#8e8e93', fontSize: '13px' }}>
+              <em>💡 {t(locale, 'importCategoryHelp')}</em>
+            </p>
+            <div className="modal-actions">
+              <button className="ghost-btn" onClick={() => setImportModalOpen(false)}>
+                {t(locale, 'cancel')}
+              </button>
+              <button 
+                className="primary-btn" 
+                onClick={() => {
+                  importInputRef.current?.click();
+                }}
+              >
+                {t(locale, 'importSelectFile')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {bulkDeleteModalOpen && (
+        <div className="modal-backdrop" onClick={() => setBulkDeleteModalOpen(false)}>
+          <div className="modal-card filter-modal" onClick={(event) => event.stopPropagation()}>
+            <h3 style={{ color: '#ff453a' }}>{t(locale, 'bulkDelete')}</h3>
+            <p style={{ marginBottom: '16px', color: '#8e8e93', fontSize: '14px' }}>
+              {t(locale, 'bulkDeleteDesc')}
+            </p>
+            <div className="filter-fields">
+              <label>
+                <span>{t(locale, 'from')}</span>
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                  <input 
+                    type="date"
+                    value={bdFromDate} 
+                    onChange={(event) => setBdFromDate(event.target.value)} 
+                  />
+                </div>
+              </label>
+              <label>
+                <span>{t(locale, 'to')}</span>
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                  <input 
+                    type="date"
+                    value={bdToDate} 
+                    onChange={(event) => setBdToDate(event.target.value)} 
+                  />
+                </div>
+              </label>
+              <label>
+                <span>{t(locale, 'project')}</span>
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+                  <select
+                    value={bdProject || ALL_PROJECTS_VALUE}
+                    onChange={(event) => setBdProject(event.target.value === ALL_PROJECTS_VALUE ? '' : event.target.value)}
+                  >
+                  <option value={ALL_PROJECTS_VALUE}></option>
+                    <option value={WITHOUT_PROJECT_VALUE}>{t(locale, 'withoutProject')}</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.name}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+                </div>
+              </label>
+              <label>
+                <span>{t(locale, 'category')}</span>
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></svg>
+                  <select
+                    value={bdCategory || ALL_CATEGORIES_VALUE}
+                    onChange={(event) => setBdCategory(event.target.value === ALL_CATEGORIES_VALUE ? '' : event.target.value)}
+                  >
+                  <option value={ALL_CATEGORIES_VALUE}></option>
+                    {displayCategories.map((category) => (
+                      <option key={category.id} value={category.name}>
+                        {category.emoji} {category.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </label>
+            </div>
+            
+            <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(255, 69, 58, 0.1)', borderRadius: '12px', border: '1px solid rgba(255, 69, 58, 0.2)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#f5f5f7', fontSize: '14px', fontWeight: '500' }}>Επιλεγμένα έξοδα:</span>
+                <strong style={{ color: '#ff453a', fontSize: '18px' }}>{expensesToDelete.length}</strong>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button
+                className="ghost-btn"
+                onClick={() => {
+                  setBulkDeleteModalOpen(false);
+                  setBdFromDate('');
+                  setBdToDate('');
+                  setBdCategory('');
+                  setBdProject('');
+                }}
+              >
+                {t(locale, 'cancel')}
+              </button>
+              <button 
+                className="primary-btn" 
+                style={{ background: '#ff453a', color: '#fff', borderColor: '#ff453a', opacity: expensesToDelete.length === 0 ? 0.5 : 1 }}
+                onClick={handleBulkDelete}
+                disabled={expensesToDelete.length === 0}
+              >
+                {t(locale, 'bulkDeleteAction').replace('{n}', String(expensesToDelete.length))}
               </button>
             </div>
           </div>

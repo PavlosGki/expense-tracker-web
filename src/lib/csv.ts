@@ -41,6 +41,12 @@ export function parseCsvRows(csvText: string) {
   let currentField = '';
   let inQuotes = false;
 
+  // Αυτόματος εντοπισμός διαχωριστικού (κόμμα ή ερωτηματικό)
+  const firstLine = csvText.split('\n')[0] || '';
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  const semiCount = (firstLine.match(/;/g) || []).length;
+  const delimiter = semiCount > commaCount ? ';' : ',';
+
   for (let index = 0; index < csvText.length; index += 1) {
     const char = csvText[index];
     const nextChar = csvText[index + 1];
@@ -55,7 +61,7 @@ export function parseCsvRows(csvText: string) {
       continue;
     }
 
-    if (char === ',' && !inQuotes) {
+    if (char === delimiter && !inQuotes) {
       currentRow.push(currentField);
       currentField = '';
       continue;
