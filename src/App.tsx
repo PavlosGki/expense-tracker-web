@@ -180,6 +180,14 @@ export default function App() {
   const [bdToDate, setBdToDate] = useState('');
   const [bdCategory, setBdCategory] = useState('');
   const [bdProject, setBdProject] = useState('');
+  const [aiApiKey, setAiApiKey] = useState(() => localStorage.getItem('expense_ai_api_key') || '');
+  const [isImporting, setIsImporting] = useState(false);
+  const [customCategoryMap, setCustomCategoryMap] = useState<Record<string, string>>(() => {
+    try { return JSON.parse(localStorage.getItem('expense_custom_category_map') || '{}'); } catch { return {}; }
+  });
+  const [importReviewModalOpen, setImportReviewModalOpen] = useState(false);
+  const [importReviewExpenses, setImportReviewExpenses] = useState<Expense[]>([]);
+  const [pendingCategoryExpenseId, setPendingCategoryExpenseId] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -436,6 +444,14 @@ export default function App() {
   useEffect(() => saveCategories(customCategories), [customCategories]);
   useEffect(() => saveProjects(projects), [projects]);
   useEffect(() => saveIncome(income), [income]);
+  
+  useEffect(() => {
+    localStorage.setItem('expense_ai_api_key', aiApiKey);
+  }, [aiApiKey]);
+  
+  useEffect(() => {
+    localStorage.setItem('expense_custom_category_map', JSON.stringify(customCategoryMap));
+  }, [customCategoryMap]);
   
   useEffect(() => {
     localStorage.setItem('expense_yearly_budget', String(yearlyBudget));
@@ -1151,6 +1167,17 @@ export default function App() {
         emoji: newCategoryEmoji.trim() || '🏷️',
       }));
     }
+    
+    if (pendingCategoryExpenseId) {
+      setImportReviewExpenses((prev) =>
+        prev.map((e) =>
+          e.id === pendingCategoryExpenseId
+            ? { ...e, category: trimmedName, emoji: newCategoryEmoji.trim() || '🏷️' }
+            : e
+        )
+      );
+      setPendingCategoryExpenseId(null);
+    }
     setNewCategoryName('');
     setNewCategoryEmoji('🏷️');
     setCategoryModalOpen(false);
@@ -1293,136 +1320,239 @@ export default function App() {
   const handleImportCsv = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    const text = await file.text();
-    const rows = parseCsvRows(text);
-    if (rows.length <= 1) {
-      window.alert(t(locale, 'invalidCsv'));
-      return;
-    }
 
-    // Αφαίρεση τόνων για πιο εύκολο matching ("ΠΟΣΟ" -> "ποσο")
-    const normalizeStr = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    const header = rows[0].map((value) => normalizeStr(value.replace(/"/g, '').trim()));
-
-    // Έξυπνη εύρεση στηλών (αγνοούμε το Υπόλοιπο, την Ημ. Αξίας κλπ)
-    const dateIndex = header.findIndex((v) => v.includes('ημερομηνια') || v.includes('ημ/νια') || v === 'date');
-    const projectIndex = header.findIndex((v) => v === 'project');
-    const descIndex = header.findIndex((v) => v.includes('κατηγορια') || v.includes('category') || v.includes('περιγραφη') || v.includes('description') || v.includes('αιτιολογια'));
-    const amountIndex = header.findIndex((v) => v.includes('ποσο') || v.includes('amount'));
-
-    if (dateIndex === -1 || descIndex === -1 || amountIndex === -1) {
-      window.alert(t(locale, 'invalidCsv'));
-      return;
-    }
-
-    // Καταλαβαίνουμε αν είναι export τράπεζας (οπότε η στήλη έχει "Περιγραφή" και όχι έτοιμη Κατηγορία)
-    const isBankExport = header[descIndex].includes('περιγραφ') || header[descIndex].includes('description') || header[descIndex].includes('αιτιολογ');
-
-    // ΛΕΞΙΚΟ ΕΞΥΠΝΩΝ ΚΑΝΟΝΩΝ (Λύση Β)
-    const BANK_CATEGORY_RULES: Record<string, string[]> = {
-      'Σούπερ Μάρκετ': ['lidl', 'ab food', 'sklavenitis', 'my market', 'masoutis', 'bazaar', 'galaxias', 'market in'],
-      'Φαγητό': ['efood', 'wolt', 'box', 'pizza', 'burger', 'grill', 'gyros', 'souvlaki', 'food', 'bakery', 'choux', 'the bitt', 'pagkalos'],
-      'Καφές': ['coffee', 'mikel', 'gregorys', 'starbucks', 'coffee island', 'everest'],
-      'Καύσιμα': ['shell', 'eko', 'bp', 'aegean', 'revoil', 'elin', 'petrol'],
-      'Διόδια': ['diodia', 'olympia odos', 'nea odos', 'gefyra', 'attiki odos', 'egnatia', 'kentriki odos'],
-      'Λογαριασμοί': ['cosmote', 'vodafone', 'nova', 'dei', 'eydap', 'protergia', 'heron', 'zenith', 'elta'],
-      'Φαρμακείο': ['farmakeio', 'pharmacy', 'φαρμακειο'],
-      'Ηλεκτρονικά': ['skroutz', 'plaisio', 'public', 'kotsovolos', 'germanos'],
-      'Ταξίδια': ['hotel', 'airbnb', 'booking', 'aegean airlines', 'sky express', 'ryanair', 'ferries'],
-      'Τράπεζα': ['eurobank', 'alpha bank', 'piraeus', 'national bank', 'ethniki', 'viva', 'paypal', 'revolut']
-    };
-
-    const importedExpenses: Expense[] = [];
-    const newCategories: Category[] = [];
-    const existingNames = new Set(allCategories.map((category) => category.name));
-    const otherCategoryName = locale === 'el' ? 'Άλλο' : 'Other';
-
-    rows.slice(1).forEach((row, index) => {
-      if (!row[dateIndex] || !row[amountIndex] || !row[descIndex]) return;
-
-      // 1. Καθαρισμός Ημερομηνίας (Υποστηρίζει DD/MM/YYYY και αγνοεί σκουπίδια)
-      const rawDate = row[dateIndex].replace(/"/g, '').trim();
-      if (!rawDate) return;
-      let date = rawDate;
-      if (rawDate.includes('/')) {
-          const parts = rawDate.split('/');
-          if (parts.length === 3) {
-              date = `${parts[2].length === 2 ? '20'+parts[2] : parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-          }
-      }
-      // Αν δεν είναι σωστή ημερομηνία, αγνοούμε εντελώς τη γραμμή (π.χ. "ΑΡΙΘΜΟΣ ΛΟΓΑΡΙΑΣΜΟΥ")
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-
-      // 2. Καθαρισμός Ποσού (-40,01 -> 40.01)
-      let rawAmount = row[amountIndex].replace(/"/g, '').trim();
-      if (rawAmount.includes(',') && rawAmount.includes('.')) {
-           const lastComma = rawAmount.lastIndexOf(',');
-           const lastDot = rawAmount.lastIndexOf('.');
-           rawAmount = lastComma > lastDot ? rawAmount.replace(/\./g, '').replace(',', '.') : rawAmount.replace(/,/g, '');
-      } else if (rawAmount.includes(',')) {
-           rawAmount = rawAmount.replace(',', '.');
-      }
-      
-      const amount = Number.parseFloat(rawAmount);
-      if (Number.isNaN(amount) || amount === 0) return;
-      const finalAmount = Math.abs(amount); // Κρατάμε την απόλυτη τιμή (αγνοούμε το πλην της τράπεζας)
-
-      // 3. Εξαγωγή Περιγραφής / Κατηγορίας
-      const desc = row[descIndex].replace(/"/g, '').trim();
-      let category = desc;
-      let comment = '';
-
-      if (isBankExport) {
-          comment = desc;
-          category = otherCategoryName;
-          const dLow = normalizeStr(desc);
-          
-          for (const [catName, keywords] of Object.entries(BANK_CATEGORY_RULES)) {
-              if (keywords.some(keyword => dLow.includes(normalizeStr(keyword)))) {
-                  category = catName;
-                  break;
-              }
-          }
-      }
-
-      const project = projectIndex === -1 ? '' : (row[projectIndex] ?? '').replace(/"/g, '').trim();
-
-      if (!existingNames.has(category)) {
-        existingNames.add(category);
-        newCategories.push({
-          id: `import_cat_${Date.now()}_${index}`,
-          name: category,
-          emoji: '🏷️',
-        });
-      }
-
-      importedExpenses.push({
-        id: `import_${Date.now()}_${index}`,
-        amount: finalAmount.toFixed(2),
-        category,
-        emoji: allCategories.find((item) => item.name === category)?.emoji ?? '🏷️',
-        date,
-        comment,
-        project: project || undefined,
-      });
-    });
-
-    // Συγχρονισμός των εισαγόμενων δεδομένων με το Cloud
-    if (user && supabase) {
-      if (newCategories.length > 0) {
-        await supabase.from('categories').insert(newCategories.map(c => ({ ...c, user_id: user.id })));
-      }
-      if (importedExpenses.length > 0) {
-          const toUpload = importedExpenses.map(({ receiptFileId, ...e }) => ({ ...e, receipt_file_id: receiptFileId ?? null, user_id: user.id }));
-          await supabase.from('expenses').insert(toUpload);
-      }
-    }
-
-    setCustomCategories((prev) => [...prev, ...newCategories]);
-    setExpenses((prev) => [...importedExpenses, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
-    event.target.value = '';
-    window.alert(t(locale, 'importDone'));
     setImportModalOpen(false);
+    setIsImporting(true);
+
+    try {
+      const text = await file.text();
+      const rows = parseCsvRows(text);
+      if (rows.length <= 1) {
+        window.alert(t(locale, 'invalidCsv'));
+        return;
+      }
+
+      // Αφαίρεση τόνων για πιο εύκολο matching ("ΠΟΣΟ" -> "ποσο")
+      const normalizeStr = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const header = rows[0].map((value) => normalizeStr(value.replace(/"/g, '').trim()));
+
+      // Έξυπνη εύρεση στηλών (αγνοούμε το Υπόλοιπο, την Ημ. Αξίας κλπ)
+      const dateIndex = header.findIndex((v) => v.includes('ημερομηνια') || v.includes('ημ/νια') || v === 'date');
+      const projectIndex = header.findIndex((v) => v === 'project');
+      const descIndex = header.findIndex((v) => v.includes('κατηγορια') || v.includes('category') || v.includes('περιγραφη') || v.includes('description') || v.includes('αιτιολογια'));
+      const amountIndex = header.findIndex((v) => v.includes('ποσο') || v.includes('amount'));
+
+      if (dateIndex === -1 || descIndex === -1 || amountIndex === -1) {
+        window.alert(t(locale, 'invalidCsv'));
+        return;
+      }
+
+      const isBankExport = header[descIndex].includes('περιγραφ') || header[descIndex].includes('description') || header[descIndex].includes('αιτιολογ');
+      const otherCategoryName = locale === 'el' ? 'Άλλο' : 'Other';
+      
+      // Έλεγχος αν υπάρχουν αρνητικά ποσά (ώστε να αγνοήσουμε τα θετικά - έσοδα)
+      let hasNegativeAmounts = false;
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row[amountIndex]) continue;
+        let rawAmt = row[amountIndex].replace(/"/g, '').trim();
+        if (rawAmt.includes(',') && rawAmt.includes('.')) {
+             const lastComma = rawAmt.lastIndexOf(',');
+             const lastDot = rawAmt.lastIndexOf('.');
+             rawAmt = lastComma > lastDot ? rawAmt.replace(/\./g, '').replace(',', '.') : rawAmt.replace(/,/g, '');
+        } else if (rawAmt.includes(',')) {
+             rawAmt = rawAmt.replace(',', '.');
+        }
+        const amt = Number.parseFloat(rawAmt);
+        if (!Number.isNaN(amt) && amt < 0) {
+          hasNegativeAmounts = true;
+          break;
+        }
+      }
+
+      let aiCategoryMap: Record<string, string> = {};
+
+      // ΜΑΓΙΚΗ ΚΛΗΣΗ ΣΤΟ GEMINI API
+      if (isBankExport && aiApiKey) {
+        try {
+          const descriptionsToCategorize = Array.from(new Set(
+            rows.slice(1)
+              .filter(row => row[dateIndex] && row[amountIndex] && row[descIndex])
+              .map(row => row[descIndex].replace(/"/g, '').trim())
+              .filter(Boolean)
+          ));
+
+          if (descriptionsToCategorize.length > 0) {
+            const catNames = displayCategories.map(c => c.name);
+            catNames.push(otherCategoryName);
+
+            const prompt = `You are a bank transaction categorizer.
+Available categories: ${catNames.join(', ')}.
+Map the following transaction descriptions to the most appropriate category. Return ONLY a valid JSON object where keys are the exact descriptions and values are the category names. If unsure, use '${otherCategoryName}'. No markdown blocks.
+Transactions:
+${descriptionsToCategorize.join('\n')}`;
+
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${aiApiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { response_mime_type: "application/json" }
+              })
+            });
+
+            if (!res.ok) {
+              const errText = await res.text();
+              throw new Error(`Κωδικός Σφάλματος: ${res.status} - ${errText}`);
+            }
+
+            const data = await res.json();
+            const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (aiText) {
+              // 1. Αφαιρούμε τυχόν markdown formatting (```json) που βάζει το LLM από συνήθεια
+              const cleanText = aiText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+              const rawMap = JSON.parse(cleanText);
+              // 2. Μετατρέπουμε όλα τα keys σε lowercase για να είμαστε 100% σίγουροι ότι θα ταιριάξουν
+              for (const [k, v] of Object.entries(rawMap)) {
+                aiCategoryMap[k.trim().toLowerCase()] = v as string;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('AI Categorization failed, falling back to basic rules', e);
+          window.alert(`Η ταξινόμηση με AI απέτυχε.\n\nΣφάλμα: ${e instanceof Error ? e.message : 'Άγνωστο'}\n\nΗ εισαγωγή θα συνεχιστεί με τους βασικούς κανόνες. Δες την κονσόλα (F12) για λεπτομέρειες.`);
+        }
+      }
+
+      // ΛΕΞΙΚΟ ΕΞΥΠΝΩΝ ΚΑΝΟΝΩΝ (Fallback αν δεν υπάρχει/αποτύχει το AI)
+      const BANK_CATEGORY_RULES: Record<string, string[]> = {
+        'Σούπερ Μάρκετ': ['lidl', 'ab food', 'sklavenitis', 'my market', 'masoutis', 'bazaar', 'galaxias', 'market in'],
+        'Φαγητό': ['efood', 'wolt', 'box', 'pizza', 'burger', 'grill', 'gyros', 'souvlaki', 'food', 'bakery', 'choux', 'the bitt', 'pagkalos'],
+        'Καφές': ['coffee', 'mikel', 'gregorys', 'starbucks', 'coffee island', 'everest'],
+        'Καύσιμα': ['shell', 'eko', 'bp', 'aegean', 'revoil', 'elin', 'petrol'],
+        'Διόδια': ['diodia', 'olympia odos', 'nea odos', 'gefyra', 'attiki odos', 'egnatia', 'kentriki odos'],
+        'Λογαριασμοί': ['cosmote', 'vodafone', 'nova', 'dei', 'eydap', 'protergia', 'heron', 'zenith', 'elta'],
+        'Φαρμακείο': ['farmakeio', 'pharmacy', 'φαρμακειο'],
+        'Ηλεκτρονικά': ['skroutz', 'plaisio', 'public', 'kotsovolos', 'germanos'],
+        'Ταξίδια': ['hotel', 'airbnb', 'booking', 'aegean airlines', 'sky express', 'ryanair', 'ferries'],
+        'Τράπεζα': ['eurobank', 'alpha bank', 'piraeus', 'national bank', 'ethniki', 'viva', 'paypal', 'revolut']
+      };
+
+      const importedExpenses: Expense[] = [];
+      const newCategories: Category[] = [];
+      const existingNames = new Set(allCategories.map((category) => category.name));
+
+      rows.slice(1).forEach((row, index) => {
+        if (!row[dateIndex] || !row[amountIndex] || !row[descIndex]) return;
+
+        // 1. Καθαρισμός Ημερομηνίας
+        const rawDate = row[dateIndex].replace(/"/g, '').trim();
+        if (!rawDate) return;
+        let date = rawDate;
+        if (rawDate.includes('/')) {
+            const parts = rawDate.split('/');
+            if (parts.length === 3) {
+                date = `${parts[2].length === 2 ? '20'+parts[2] : parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            }
+        }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+
+        // 2. Καθαρισμός Ποσού
+        let rawAmount = row[amountIndex].replace(/"/g, '').trim();
+        if (rawAmount.includes(',') && rawAmount.includes('.')) {
+             const lastComma = rawAmount.lastIndexOf(',');
+             const lastDot = rawAmount.lastIndexOf('.');
+             rawAmount = lastComma > lastDot ? rawAmount.replace(/\./g, '').replace(',', '.') : rawAmount.replace(/,/g, '');
+        } else if (rawAmount.includes(',')) {
+             rawAmount = rawAmount.replace(',', '.');
+        }
+        
+        const amount = Number.parseFloat(rawAmount);
+        if (Number.isNaN(amount) || amount === 0) return;
+        
+        // Αν έχουμε έστω και ένα αρνητικό, αγνοούμε εντελώς τα θετικά νούμερα (είναι πιστώσεις)
+        if (hasNegativeAmounts && amount > 0) return;
+
+        const finalAmount = Math.abs(amount);
+
+        // 3. Εξαγωγή Περιγραφής / Κατηγορίας
+        const desc = row[descIndex].replace(/"/g, '').trim();
+        let category = desc;
+        let comment = '';
+
+        if (isBankExport) {
+            comment = desc;
+            const descLow = desc.toLowerCase();
+            const cleanDesc = normalizeStr(desc);
+            
+            if (customCategoryMap[cleanDesc]) {
+                category = customCategoryMap[cleanDesc]; // 1. Από το ιστορικό εκμάθησης (User Rules)
+            } else if (aiCategoryMap[descLow]) {
+                category = aiCategoryMap[descLow]; // Από το AI Map
+            } else {
+                // Fallback
+                category = otherCategoryName;
+                const dLow = normalizeStr(desc);
+                for (const [catName, keywords] of Object.entries(BANK_CATEGORY_RULES)) {
+                    if (keywords.some(keyword => dLow.includes(normalizeStr(keyword)))) {
+                        category = catName;
+                        break;
+                    }
+                }
+            }
+        }
+
+        const project = projectIndex === -1 ? '' : (row[projectIndex] ?? '').replace(/"/g, '').trim();
+
+        if (!existingNames.has(category)) {
+          existingNames.add(category);
+          newCategories.push({
+            id: `import_cat_${Date.now()}_${index}`,
+            name: category,
+            emoji: '🏷️',
+          });
+        }
+
+        importedExpenses.push({
+          id: `import_${Date.now()}_${index}`,
+          amount: finalAmount.toFixed(2),
+          category,
+          emoji: allCategories.find((item) => item.name === category)?.emoji ?? '🏷️',
+          date,
+          comment,
+          project: project || undefined,
+        });
+      });
+
+      // Συγχρονισμός των εισαγόμενων δεδομένων με το Cloud
+      if (user && supabase) {
+        if (newCategories.length > 0) {
+          await supabase.from('categories').insert(newCategories.map(c => ({ ...c, user_id: user.id })));
+        }
+        if (importedExpenses.length > 0) {
+            const toUpload = importedExpenses.map(({ receiptFileId, ...e }) => ({ ...e, receipt_file_id: receiptFileId ?? null, user_id: user.id }));
+            await supabase.from('expenses').insert(toUpload);
+        }
+      }
+
+      setCustomCategories((prev) => [...prev, ...newCategories]);
+      setExpenses((prev) => [...importedExpenses, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
+      
+      const uncategorized = importedExpenses.filter(e => e.category === otherCategoryName);
+      if (uncategorized.length > 0) {
+        setImportReviewExpenses(uncategorized);
+        setImportReviewModalOpen(true);
+      } else {
+        window.alert(t(locale, 'importDone'));
+      }
+
+    } catch (error) {
+      console.error('Import error:', error);
+      window.alert(t(locale, 'invalidCsv'));
+    } finally {
+      setIsImporting(false);
+      if (event.target) event.target.value = '';
+    }
   };
 
   const handleReceiptUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1466,7 +1596,7 @@ export default function App() {
 
   const showDashboard = tab !== 'settings';
   const isAnyModalOpen =
-    expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen || exportModalOpen || importModalOpen || bulkDeleteModalOpen || analyticsModal !== null;
+    expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen || exportModalOpen || importModalOpen || bulkDeleteModalOpen || importReviewModalOpen || analyticsModal !== null;
 
   const handleGoogleSignIn = async () => {
     if (!supabase) return;
@@ -2718,6 +2848,20 @@ export default function App() {
         </>
       )}
 
+      {isImporting && (
+        <div className="modal-backdrop" style={{ zIndex: 9999, flexDirection: 'column', gap: '16px', textAlign: 'center' }}>
+          <style>{`
+            @keyframes aiPulse {
+              0% { transform: scale(0.9); opacity: 0.8; filter: drop-shadow(0 0 12px rgba(10, 132, 255, 0.4)); }
+              50% { transform: scale(1.1); opacity: 1; filter: drop-shadow(0 0 32px rgba(10, 132, 255, 0.8)); }
+              100% { transform: scale(0.9); opacity: 0.8; filter: drop-shadow(0 0 12px rgba(10, 132, 255, 0.4)); }
+            }
+          `}</style>
+          <div style={{ fontSize: '56px', animation: 'aiPulse 2s infinite ease-in-out' }}>✨🤖</div>
+          <h3 style={{ color: '#fff', margin: 0 }}>{t(locale, 'importProcessing')}</h3>
+        </div>
+      )}
+
       {/* Monthly Wrapped Modal */}
       {showWrappedModal && wrappedData && (
         <div className="modal-backdrop" style={{ zIndex: 2000 }} onClick={() => {}}>
@@ -3559,6 +3703,23 @@ export default function App() {
             <p style={{ marginTop: '0', marginBottom: '24px', color: '#8e8e93', fontSize: '13px' }}>
               <em>💡 {t(locale, 'importCategoryHelp')}</em>
             </p>
+            <div style={{ marginBottom: '24px', background: 'rgba(255,255,255,0.03)', padding: '12px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <label>
+                <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  {t(locale, 'aiKeyLabel')}
+                  <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: '#0a84ff', textDecoration: 'none' }}>{t(locale, 'aiKeyHint')}</a>
+                </span>
+                <div className="input-icon-wrap">
+                  <svg viewBox="0 0 24 24" width="18" height="18" stroke="#bf5af2" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L15 9l7 3-7 3-3 7-3-7-7-3 7-3z" /></svg>
+                  <input
+                    type="password"
+                    placeholder={t(locale, 'aiKeyPlaceholder')}
+                    value={aiApiKey}
+                    onChange={(e) => setAiApiKey(e.target.value)}
+                  />
+                </div>
+              </label>
+            </div>
             <div className="modal-actions">
               <button className="ghost-btn" onClick={() => setImportModalOpen(false)}>
                 {t(locale, 'cancel')}
@@ -3670,6 +3831,78 @@ export default function App() {
                 disabled={expensesToDelete.length === 0}
               >
                 {t(locale, 'bulkDeleteAction').replace('{n}', String(expensesToDelete.length))}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importReviewModalOpen && (
+        <div className="modal-backdrop" onClick={() => {}}>
+          <div className="modal-card filter-modal" style={{ maxWidth: '500px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={(event) => event.stopPropagation()}>
+            <h3>{t(locale, 'importReviewTitle')}</h3>
+            <p style={{ marginBottom: '16px', color: '#8e8e93', fontSize: '14px' }}>
+              {t(locale, 'importReviewDesc')}
+            </p>
+            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px', paddingRight: '4px' }}>
+              {importReviewExpenses.map((expense) => (
+                <div key={expense.id} style={{ background: '#111214', padding: '14px', borderRadius: '14px', border: '1px solid #2c2c2e' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <strong style={{ fontSize: '15px', color: '#fff', wordBreak: 'break-word' }}>{expense.comment || expense.category}</strong>
+                    <strong style={{ color: '#fff', fontSize: '15px' }}>{expense.amount}€</strong>
+                  </div>
+                  <div style={{ color: '#8e8e93', fontSize: '13px', marginBottom: '12px' }}>{formatIsoDate(expense.date)}</div>
+                  
+                  <div className="input-icon-wrap">
+                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></svg>
+                    <select
+                      value={expense.category}
+                      onChange={(event) => {
+                        const val = event.target.value;
+                        if (val === NEW_CATEGORY_VALUE) {
+                          setPendingCategoryExpenseId(expense.id);
+                          openCategoryModal(false);
+                        } else {
+                          const cat = allCategories.find((c) => c.name === val);
+                          setImportReviewExpenses((prev) => prev.map((ex) => ex.id === expense.id ? { ...ex, category: val, emoji: cat?.emoji ?? '🏷️' } : ex));
+                        }
+                      }}
+                      style={{ height: '42px', paddingLeft: '38px', fontSize: '14px' }}
+                    >
+                      <option value={locale === 'el' ? 'Άλλο' : 'Other'}>{t(locale, 'other')}</option>
+                      {displayCategories.map((category) => (
+                        <option key={category.id} value={category.name}>
+                          {category.emoji} {category.displayName}
+                        </option>
+                      ))}
+                      <option value={NEW_CATEGORY_VALUE}>{t(locale, 'newCategoryOption')}</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button className="ghost-btn" onClick={() => { setImportReviewModalOpen(false); setImportReviewExpenses([]); window.alert(t(locale, 'importDone')); }}>
+                {t(locale, 'skip')}
+              </button>
+              <button className="primary-btn" onClick={async () => {
+                setExpenses((prev) => prev.map((e) => { const reviewed = importReviewExpenses.find((r) => r.id === e.id); return reviewed ? reviewed : e; }));
+                
+                const newMap = { ...customCategoryMap };
+                importReviewExpenses.forEach(e => {
+                  if (e.comment && e.category !== (locale === 'el' ? 'Άλλο' : 'Other') && e.category !== NEW_CATEGORY_VALUE) {
+                    newMap[e.comment.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()] = e.category;
+                  }
+                });
+                setCustomCategoryMap(newMap);
+
+                if (user && supabase) {
+                  const toUpsert = importReviewExpenses.map(({ receiptFileId, ...e }) => ({ ...e, receipt_file_id: receiptFileId ?? null, user_id: user.id }));
+                  await supabase.from('expenses').upsert(toUpsert);
+                }
+                setImportReviewModalOpen(false); setImportReviewExpenses([]); window.alert(t(locale, 'importDone'));
+              }}>
+                {t(locale, 'saveCategories')}
               </button>
             </div>
           </div>
@@ -3867,7 +4100,7 @@ export default function App() {
       )}
 
       {categoryModalOpen && (
-        <div className="modal-backdrop" onClick={() => { setCategoryModalOpen(false); setCategoryModalForExpense(false); }}>
+        <div className="modal-backdrop" onClick={() => { setCategoryModalOpen(false); setCategoryModalForExpense(false); setPendingCategoryExpenseId(null); }}>
           <form className="modal-card expense-form" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); handleAddCategory(); }}>
             <h3>{t(locale, 'addCategory')}</h3>
             <div className="category-create-row">
@@ -3901,7 +4134,7 @@ export default function App() {
               </label>
             </div>
             <div className="modal-actions">
-              <button type="button" className="ghost-btn" onClick={() => { setCategoryModalOpen(false); setCategoryModalForExpense(false); }}>
+              <button type="button" className="ghost-btn" onClick={() => { setCategoryModalOpen(false); setCategoryModalForExpense(false); setPendingCategoryExpenseId(null); }}>
                 {t(locale, 'cancel')}
               </button>
               <button type="submit" className="primary-btn">
