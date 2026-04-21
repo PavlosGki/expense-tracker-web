@@ -2472,7 +2472,7 @@ ${descriptionsToCategorize.join('\n')}`;
                           <p className="empty-line">{t(locale, 'noExpenses')}</p>
                         ) : (
                           rows.map((row) => {
-                            const fillPct = maxAmount > 0 ? Math.max(18, (row.amount / maxAmount) * 100) : 18;
+                            const fillPct = maxAmount > 0 ? Math.max(1, (row.amount / maxAmount) * 100) : 0;
                             const isTightBar = fillPct <= 30;
                             return (
                               <div key={`${group.id}_${row.name}`} className="bar-row">
