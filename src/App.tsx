@@ -161,6 +161,8 @@ export default function App() {
     saved: number;
     topCategory: { name: string; emoji: string; amount: number } | null;
   } | null>(null);
+  const hasLocalBudgetOverrideRef = useRef(false);
+  const pendingBudgetRef = useRef<{ income: number; yearly: number } | null>(null);
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
   const stickyShellRef = useRef<HTMLDivElement | null>(null);
   const carouselRef = useRef<HTMLDivElement | null>(null);
@@ -260,10 +262,19 @@ export default function App() {
       const hasSyncedBefore = !!profile;
       
       if (profile) {
+        if (hasLocalBudgetOverrideRef.current && pendingBudgetRef.current) {
+          await supabase.from('profiles').update({
+            income: pendingBudgetRef.current.income,
+            yearly_budget: pendingBudgetRef.current.yearly,
+            updated_at: new Date().toISOString()
+          }).eq('id', user.id);
+        }
+
         const cloudIncome = Number(profile.income);
         const cloudYearly = Number(profile.yearly_budget);
         
-        if (cloudIncome === 0 && income > 0) {
+        if (hasLocalBudgetOverrideRef.current) {
+        } else if (cloudIncome === 0 && income > 0) {
           await supabase.from('profiles').update({ 
             income, 
             yearly_budget: yearlyBudget,
@@ -273,7 +284,8 @@ export default function App() {
           setIncome(cloudIncome);
         }
 
-        if (cloudYearly === 0 && yearlyBudget > 0) {
+        if (hasLocalBudgetOverrideRef.current) {
+        } else if (cloudYearly === 0 && yearlyBudget > 0) {
         } else if (cloudYearly !== undefined && !isNaN(cloudYearly)) {
           setYearlyBudget(cloudYearly);
         }
@@ -1213,6 +1225,9 @@ export default function App() {
   };
 
   const expensesToDelete = useMemo(() => {
+    const hasAnyFilter = Boolean(bdFromDate || bdToDate || bdCategory || bdProject);
+    if (!hasAnyFilter) return [];
+
     let filtered = expenses;
     if (bdCategory) {
       filtered = filtered.filter((e) => e.category === bdCategory);
@@ -1542,8 +1557,21 @@ ${descriptionsToCategorize.join('\n')}`;
   const handleSaveBudget = async () => {
     const finalIncome = Number(budgetInputValue) || 0;
     const finalYearly = Number(yearlyBudgetInputValue) || 0;
+    hasLocalBudgetOverrideRef.current = true;
+    pendingBudgetRef.current = { income: finalIncome, yearly: finalYearly };
     setIncome(finalIncome);
     setYearlyBudget(finalYearly);
+
+    if (user?.id && supabase) {
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        income: finalIncome,
+        yearly_budget: finalYearly,
+        locale,
+        background,
+        updated_at: new Date().toISOString()
+      });
+    }
   };
 
   const handleDeleteReceipt = async () => {
