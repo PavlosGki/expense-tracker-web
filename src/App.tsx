@@ -1,6 +1,7 @@
 import type { Session, User } from '@supabase/supabase-js';
 import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { buildCsv, downloadCsv, parseCsvRows } from './lib/csv';
+import { compressImage } from './lib/media';
 import {
   filterExpensesByDateRange,
   formatIsoDate,
@@ -34,6 +35,10 @@ import {
 } from './lib/storage';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { Header } from './components/Header';
+import { HeatmapLegend } from './components/HeatmapLegend';
+import { HomeMainView } from './views/HomeMainView';
+import { SettingsView } from './views/SettingsView';
+import { AnalyticsMainView } from './views/AnalyticsMainView';
 import {
   ALL_CATEGORIES_VALUE,
   ALL_PROJECTS_VALUE,
@@ -48,63 +53,20 @@ import {
   RANGE_OPTIONS,
   WITHOUT_PROJECT_VALUE,
 } from './config/appConstants';
+import {
+  YEAR_HEATMAP_MONTH_FULL_EL,
+  YEAR_HEATMAP_MONTH_FULL_EN,
+  YEAR_HEATMAP_MONTH_LABELS_EL,
+  YEAR_HEATMAP_MONTH_LABELS_EN,
+} from './config/heatmapConstants';
+import { useHorizontalSwipe } from './hooks/useHorizontalSwipe';
 import { useBudgetPace } from './hooks/useBudgetPace';
 import { useAnalyticsInsights } from './hooks/useAnalyticsInsight';
+import { getHeatmapColor } from './lib/heatmap';
 import './styles.css';
-import type { Category, Expense, Locale, Project, Range, TabId } from './types';
-
-type ExpenseDraft = {
-  project: string;
-  amount: string;
-  category: string;
-  emoji: string;
-  date: string;
-  comment: string;
-  receiptFileId: string | null;
-};
-
-
-const compressImage = (file: File): Promise<Blob | File> => {
-  return new Promise((resolve) => {
-    if (!file.type.startsWith('image/')) {
-      resolve(file); // Αν είναι PDF, δεν κάνουμε συμπίεση
-      return;
-    }
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 1200;
-        const MAX_HEIGHT = 1600;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
-        } else {
-          if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-        canvas.toBlob((blob) => resolve(blob || file), 'image/jpeg', 0.7); // 70% ποιότητα
-      };
-      img.onerror = () => resolve(file);
-    };
-    reader.onerror = () => resolve(file);
-  });
-};
+import type { Category, Expense, ExpenseDraft, Locale, Project, Range, TabId } from './types';
 
 export default function App() {
-  const YEAR_HEATMAP_MONTH_LABELS_EL = ['ΙΑΝ', 'ΦΕΒ', 'ΜΑΡ', 'ΑΠΡ', 'ΜΑΙ', 'ΙΟΥΝ', 'ΙΟΥΛ', 'ΑΥΓ', 'ΣΕΠ', 'ΟΚΤ', 'ΝΟΕ', 'ΔΕΚ'];
-  const YEAR_HEATMAP_MONTH_LABELS_EN = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-  const YEAR_HEATMAP_MONTH_FULL_EL = ['Ιανουάριος', 'Φεβρουάριος', 'Μάρτιος', 'Απρίλιος', 'Μάιος', 'Ιούνιος', 'Ιούλιος', 'Αύγουστος', 'Σεπτέμβριος', 'Οκτώβριος', 'Νοέμβριος', 'Δεκέμβριος'];
-  const YEAR_HEATMAP_MONTH_FULL_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const [locale, setLocale] = useState<Locale>(() => loadLocale());
   const [tab, setTab] = useState<TabId>('home');
   const [expenses, setExpenses] = useState<Expense[]>(() => loadExpenses());
@@ -200,21 +162,6 @@ export default function App() {
     topCategory: { name: string; emoji: string; amount: number } | null;
   } | null>(null);
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
-  const heatmapTouchStartXRef = useRef<number | null>(null);
-  const heatmapMouseStartXRef = useRef<number | null>(null);
-  const heatmapMouseCurrentXRef = useRef<number | null>(null);
-  const heatmapMouseDraggingRef = useRef(false);
-  const heatmapPreventClickRef = useRef(false);
-  const yearHeatmapTouchStartXRef = useRef<number | null>(null);
-  const yearHeatmapMouseStartXRef = useRef<number | null>(null);
-  const yearHeatmapMouseCurrentXRef = useRef<number | null>(null);
-  const yearHeatmapMouseDraggingRef = useRef(false);
-  const yearHeatmapPreventClickRef = useRef(false);
-  const weekHeatmapTouchStartXRef = useRef<number | null>(null);
-  const weekHeatmapMouseStartXRef = useRef<number | null>(null);
-  const weekHeatmapMouseCurrentXRef = useRef<number | null>(null);
-  const weekHeatmapMouseDraggingRef = useRef(false);
-  const weekHeatmapPreventClickRef = useRef(false);
   const stickyShellRef = useRef<HTMLDivElement | null>(null);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const activeBudgetSlideRef = useRef(Number(localStorage.getItem('expense_active_budget_slide')) || 0);
@@ -242,8 +189,6 @@ export default function App() {
 
     let active = true;
 
-    // Αρχικοποίηση Auth και παρακολούθηση αλλαγών (Login/Logout/Redirect)
-    // Ζητάμε το τρέχον session ρητά για να μην κολλήσει το loading
       supabase.auth.getSession()
         .then(({ data: { session } }) => {
           if (active) {
@@ -252,13 +197,11 @@ export default function App() {
           }
         })
         .catch((error) => {
-          console.error("Supabase Auth Error:", error);
         })
         .finally(() => {
           if (active) setAuthLoading(false);
         });
 
-      // Παρακολούθηση αλλαγών (Login/Logout/Redirect)
       const {
         data: { subscription },
       } = supabase.auth.onAuthStateChange((_event, nextSession) => {
@@ -306,7 +249,6 @@ export default function App() {
     }
   }, [tab]);
 
-  // Cloud Sync Logic: Φόρτωση δεδομένων από το Supabase μετά το Login
   useEffect(() => {
     async function syncCloudData() {
       if (!user || !supabase) return;
@@ -314,7 +256,6 @@ export default function App() {
       const isFirstLoad = !isInitialSyncDone;
       if (isFirstLoad) setIsInitialSyncDone(false);
 
-      // 1. Φόρτωση Προφίλ (Income, Locale, κλπ)
       const { data: profile } = await supabase.from('profiles').select('*').maybeSingle();
       const hasSyncedBefore = !!profile;
       
@@ -322,8 +263,6 @@ export default function App() {
         const cloudIncome = Number(profile.income);
         const cloudYearly = Number(profile.yearly_budget);
         
-        // Robust Sync: Αν το cloud έχει 0 αλλά το τοπικό state έχει ήδη τιμή (από localStorage),
-        // τότε προτιμούμε την τοπική τιμή και ενημερώνουμε το cloud.
         if (cloudIncome === 0 && income > 0) {
           await supabase.from('profiles').update({ 
             income, 
@@ -335,7 +274,6 @@ export default function App() {
         }
 
         if (cloudYearly === 0 && yearlyBudget > 0) {
-          // Handled by update above
         } else if (cloudYearly !== undefined && !isNaN(cloudYearly)) {
           setYearlyBudget(cloudYearly);
         }
@@ -343,7 +281,6 @@ export default function App() {
         setLocale(profile.locale as Locale);
         setBackground(profile.background as StoredBackground);
       } else {
-        // Αν δεν υπάρχει καθόλου προφίλ, δημιουργούμε ένα με τις τρέχουσες τοπικές τιμές
         await supabase.from('profiles').insert({ 
           id: user.id, 
           income, 
@@ -354,7 +291,6 @@ export default function App() {
         });
       }
 
-      // 2. Φόρτωση Εξόδων & Migration
       const { data: remoteExpenses } = await supabase.from('expenses').select('*').order('date', { ascending: false });
       if (remoteExpenses) {
         if (remoteExpenses.length > 0 || hasSyncedBefore) {
@@ -364,13 +300,11 @@ export default function App() {
             receiptFileId: receipt_file_id ?? e.receiptFileId ?? null
           }) as Expense));
         } else if (expenses.length > 0) {
-          // Migration: Αν η βάση είναι άδεια, ανέβασε τα τοπικά έξοδα
           const toUpload = expenses.map(({ receiptFileId, ...e }) => ({ ...e, receipt_file_id: receiptFileId ?? null, user_id: user.id }));
           await supabase.from('expenses').insert(toUpload);
         }
       }
 
-      // 3. Φόρτωση Κατηγοριών
       const { data: remoteCats } = await supabase.from('categories').select('*');
       if (remoteCats) {
         if (remoteCats.length > 0 || hasSyncedBefore) {
@@ -381,7 +315,6 @@ export default function App() {
         }
       }
       
-      // 4. Φόρτωση Projects
       const { data: remoteProjects } = await supabase.from('projects').select('*');
       if (remoteProjects) {
         if (remoteProjects.length > 0 || hasSyncedBefore) {
@@ -392,23 +325,19 @@ export default function App() {
         }
       }
 
-      // Σηματοδότηση ότι ο αρχικός συγχρονισμός ολοκληρώθηκε
       setIsInitialSyncDone(true);
     }
 
     if (user?.id) syncCloudData();
   }, [user?.id]);
 
-  // Monthly Wrapped Logic (Μηνιαία Ανασκόπηση)
   useEffect(() => {
     if (!isInitialSyncDone || tab !== 'home') return;
 
     const today = new Date();
-    // Παίρνουμε τον προηγούμενο μήνα ρυθμίζοντας την ημερομηνία στην 1η μέρα του τρέχοντος, και αφαιρώντας 1 μήνα
     const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const prevMonthKey = toLocalIsoDate(prevMonthDate).slice(0, 7); // YYYY-MM
 
-    // Έλεγχος αν ο χρήστης έχει ήδη δει την ανασκόπηση για αυτόν τον μήνα
     if (localStorage.getItem('expense_wrapped_seen') === prevMonthKey) return;
 
     const prevMonthExpenses = expenses.filter((e) => e.date?.startsWith(prevMonthKey));
@@ -438,7 +367,6 @@ export default function App() {
     setShowWrappedModal(true);
   }, [isInitialSyncDone, tab, expenses, income, locale]);
 
-  // Το Local Storage πρέπει να ενημερώνεται ΠΑΝΤΑ, λειτουργώντας ως cache.
   useEffect(() => saveLocale(locale), [locale]);
   useEffect(() => saveExpenses(expenses), [expenses]);
   useEffect(() => saveCategories(customCategories), [customCategories]);
@@ -458,7 +386,6 @@ export default function App() {
     setYearlyBudgetInputValue(String(yearlyBudget));
   }, [yearlyBudget]);
 
-  // Συγχρονισμός Προφίλ στο Cloud όταν αλλάζουν βασικές ρυθμίσεις
   useEffect(() => {
     if (user?.id && supabase && isInitialSyncDone) {
       supabase.from('profiles').upsert({ 
@@ -509,15 +436,20 @@ export default function App() {
   );
   const filteredExpenses = useMemo(
     () => {
-      // Αν δεν υπάρχει ενεργό φίλτρο ημερομηνίας, θέλουμε να βλέπουμε τα πάντα 
-      // στα σύνολα (day/week/month/year), συμπεριλαμβανομένων των μελλοντικών.
       if (!filterFromDate && !filterToDate) return metaFilteredExpenses;
       return filterExpensesByDateRange(metaFilteredExpenses, filterFromDate, filterToDate);
     },
     [metaFilteredExpenses, filterFromDate, filterToDate]
   );
+  const analyticsCategoryUniverse = useMemo(() => {
+    const map = new Map<string, string>();
+    filteredExpenses.forEach((expense) => {
+      const key = expense.category || t(locale, 'other');
+      if (!map.has(key)) map.set(key, expense.emoji || '🏷️');
+    });
+    return Array.from(map.entries()).map(([name, emoji]) => ({ name, emoji }));
+  }, [filteredExpenses, locale]);
 
-  // Υπολογισμός των No-Spend Days για τον τρέχοντα μήνα
   const noSpendDaysThisMonth = useMemo(() => {
     const today = new Date();
     const currentMonthPrefix = toLocalIsoDate(today).slice(0, 7); // "YYYY-MM"
@@ -537,13 +469,9 @@ export default function App() {
     return Math.max(0, todayDateNum - daysWithExpenses.size);
   }, [expenses]);
 
-  // Υπολογισμός των ορίων ημερομηνίας για τις λίστες (Ιστορικό/Ανάλυση)
-  // Αν δεν υπάρχει φίλτρο, χρησιμοποιούμε την παλαιότερη και τη νεότερη ημερομηνία από τα δεδομένα
   const listBounds = useMemo(() => {
     const hasExpenses = metaFilteredExpenses.length > 0;
     const today = new Date();
-    // Εξασφαλίζουμε ότι το 'to' όριο είναι τουλάχιστον η σημερινή ημερομηνία
-    // ή η ημερομηνία του πιο μελλοντικού εξόδου, αν δεν υπάρχει φίλτρο.
     const maxDateFromExpenses = hasExpenses ? parseIsoDateToLocal(metaFilteredExpenses[0].date) : today;
 
     return {
@@ -776,7 +704,6 @@ export default function App() {
       setSeamlessHeatmapTransition(false);
     }
 
-    // Επαναφορά στην τρέχουσα ημερομηνία όταν κλείνουν τα pop-ups
     if (analyticsModal === null) {
       const now = new Date();
       const currentYear = now.getFullYear();
@@ -899,6 +826,18 @@ export default function App() {
     });
     setActiveWeekHeatmapDayIndex(0);
   };
+  const monthHeatmapSwipe = useHorizontalSwipe({
+    onSwipeLeft: () => shiftHeatmapMonth(1),
+    onSwipeRight: () => shiftHeatmapMonth(-1),
+  });
+  const weekHeatmapSwipe = useHorizontalSwipe({
+    onSwipeLeft: () => shiftWeekHeatmap(1),
+    onSwipeRight: () => shiftWeekHeatmap(-1),
+  });
+  const yearHeatmapSwipe = useHorizontalSwipe({
+    onSwipeLeft: () => shiftYearHeatmap(1),
+    onSwipeRight: () => shiftYearHeatmap(-1),
+  });
 
   const topCategories = useMemo(() => {
     const frequency: Record<string, number> = {};
@@ -929,7 +868,6 @@ export default function App() {
     setEditingExpense(null);
 
     const lastProject = loadLastProject(); // Load from localStorage
-    // Επιβεβαιώνουμε ότι το project υπάρχει ακόμα στη λίστα σου πριν το προεπιλέξουμε
     const defaultProject = projects.some(p => p.name === lastProject) ? (lastProject || '') : ''; // Check if project exists
 
     setDraft({
@@ -943,6 +881,18 @@ export default function App() {
     });
     setExpenseModalOpen(true);
   };
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const action = url.searchParams.get('action');
+    if (action !== 'add-expense') return;
+
+    setTab('home');
+    openAddExpense();
+
+    url.searchParams.delete('action');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   const handleFabPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return; // Μόνο αριστερό κλικ / αφή
@@ -1031,11 +981,9 @@ export default function App() {
     receiptFileId: draft.receiptFileId || null,
     };
 
-    // Αποθήκευση στο Supabase αν ο χρήστης είναι συνδεδεμένος
     if (user && supabase) {
       const { receiptFileId, ...dbExpense } = nextExpense;
       const { error } = await supabase.from('expenses').upsert({ ...dbExpense, receipt_file_id: receiptFileId, user_id: user.id });
-      if (error) console.error('Error saving to cloud:', error);
     }
 
     saveLastProject(nextExpense.project || null); // Αποθήκευση του τελευταίου project
@@ -1069,7 +1017,6 @@ export default function App() {
     
     if (user && supabase) {
       const { error } = await supabase.from('expenses').delete().eq('id', id);
-      if (error) console.error('Error deleting from cloud:', error);
     }
   };
 
@@ -1078,7 +1025,6 @@ export default function App() {
 
     if (user && supabase) {
       const { error } = await supabase.from('categories').delete().eq('id', id);
-      if (error) console.error('Error deleting category from cloud:', error);
     }
   };
 
@@ -1095,7 +1041,6 @@ export default function App() {
 
     if (user && supabase) {
       if (projectToDelete) {
-        // 1. Καθαρίζουμε το project από τα έξοδα στο cloud ΠΡΙΝ διαγράψουμε το project
         await supabase
           .from('expenses')
           .update({ project: null })
@@ -1103,12 +1048,10 @@ export default function App() {
           .eq('user_id', user.id);
       }
       
-      // 2. Διαγράφουμε το project
       await supabase.from('projects').delete().eq('id', id);
     }
 
     if (projectToDelete) {
-      // Ενημέρωση εξόδων τοπικά (στο cloud θα μπορούσε να γίνει με RPC ή trigger, αλλά το κάνουμε upsert αν χρειαστεί)
       setExpenses((prev) =>
         prev.map((expense) => (expense.project === projectToDelete.name ? { ...expense, project: undefined } : expense))
       );
@@ -1133,7 +1076,6 @@ export default function App() {
     
     if (user && supabase) {
       const { error } = await supabase.from('projects').insert({ ...newProject, user_id: user.id });
-      if (error) console.error('Error adding project to cloud:', error);
     }
 
     setProjects((prev) => [...prev, newProject]);
@@ -1156,7 +1098,6 @@ export default function App() {
     
     if (user && supabase) {
       const { error } = await supabase.from('categories').insert({ ...newCat, user_id: user.id });
-      if (error) console.error('Error adding category to cloud:', error);
     }
 
     setCustomCategories((prev) => [...prev, newCat]);
@@ -1302,7 +1243,6 @@ export default function App() {
       for (let i = 0; i < idsToDelete.length; i += chunkSize) {
         const chunk = idsToDelete.slice(i, i + chunkSize);
         const { error } = await supabase.from('expenses').delete().in('id', chunk);
-        if (error) console.error('Error bulk deleting from cloud:', error);
       }
     }
 
@@ -1332,11 +1272,9 @@ export default function App() {
         return;
       }
 
-      // Αφαίρεση τόνων για πιο εύκολο matching ("ΠΟΣΟ" -> "ποσο")
       const normalizeStr = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       const header = rows[0].map((value) => normalizeStr(value.replace(/"/g, '').trim()));
 
-      // Έξυπνη εύρεση στηλών (αγνοούμε το Υπόλοιπο, την Ημ. Αξίας κλπ)
       const dateIndex = header.findIndex((v) => v.includes('ημερομηνια') || v.includes('ημ/νια') || v === 'date');
       const projectIndex = header.findIndex((v) => v === 'project');
       const descIndex = header.findIndex((v) => v.includes('κατηγορια') || v.includes('category') || v.includes('περιγραφη') || v.includes('description') || v.includes('αιτιολογια'));
@@ -1350,7 +1288,6 @@ export default function App() {
       const isBankExport = header[descIndex].includes('περιγραφ') || header[descIndex].includes('description') || header[descIndex].includes('αιτιολογ');
       const otherCategoryName = locale === 'el' ? 'Άλλο' : 'Other';
       
-      // Έλεγχος αν υπάρχουν αρνητικά ποσά (ώστε να αγνοήσουμε τα θετικά - έσοδα)
       let hasNegativeAmounts = false;
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
@@ -1372,7 +1309,6 @@ export default function App() {
 
       let aiCategoryMap: Record<string, string> = {};
 
-      // ΜΑΓΙΚΗ ΚΛΗΣΗ ΣΤΟ GEMINI API
       if (isBankExport && aiApiKey) {
         try {
           const descriptionsToCategorize = Array.from(new Set(
@@ -1409,22 +1345,18 @@ ${descriptionsToCategorize.join('\n')}`;
             const data = await res.json();
             const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text;
             if (aiText) {
-              // 1. Αφαιρούμε τυχόν markdown formatting (```json) που βάζει το LLM από συνήθεια
               const cleanText = aiText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
               const rawMap = JSON.parse(cleanText);
-              // 2. Μετατρέπουμε όλα τα keys σε lowercase για να είμαστε 100% σίγουροι ότι θα ταιριάξουν
               for (const [k, v] of Object.entries(rawMap)) {
                 aiCategoryMap[k.trim().toLowerCase()] = v as string;
               }
             }
           }
         } catch (e) {
-          console.error('AI Categorization failed, falling back to basic rules', e);
           window.alert(`Η ταξινόμηση με AI απέτυχε.\n\nΣφάλμα: ${e instanceof Error ? e.message : 'Άγνωστο'}\n\nΗ εισαγωγή θα συνεχιστεί με τους βασικούς κανόνες. Δες την κονσόλα (F12) για λεπτομέρειες.`);
         }
       }
 
-      // ΛΕΞΙΚΟ ΕΞΥΠΝΩΝ ΚΑΝΟΝΩΝ (Fallback αν δεν υπάρχει/αποτύχει το AI)
       const BANK_CATEGORY_RULES: Record<string, string[]> = {
         'Σούπερ Μάρκετ': ['lidl', 'ab food', 'sklavenitis', 'my market', 'masoutis', 'bazaar', 'galaxias', 'market in'],
         'Φαγητό': ['efood', 'wolt', 'box', 'pizza', 'burger', 'grill', 'gyros', 'souvlaki', 'food', 'bakery', 'choux', 'the bitt', 'pagkalos'],
@@ -1445,7 +1377,6 @@ ${descriptionsToCategorize.join('\n')}`;
       rows.slice(1).forEach((row, index) => {
         if (!row[dateIndex] || !row[amountIndex] || !row[descIndex]) return;
 
-        // 1. Καθαρισμός Ημερομηνίας
         const rawDate = row[dateIndex].replace(/"/g, '').trim();
         if (!rawDate) return;
         let date = rawDate;
@@ -1457,7 +1388,6 @@ ${descriptionsToCategorize.join('\n')}`;
         }
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
 
-        // 2. Καθαρισμός Ποσού
         let rawAmount = row[amountIndex].replace(/"/g, '').trim();
         if (rawAmount.includes(',') && rawAmount.includes('.')) {
              const lastComma = rawAmount.lastIndexOf(',');
@@ -1470,12 +1400,10 @@ ${descriptionsToCategorize.join('\n')}`;
         const amount = Number.parseFloat(rawAmount);
         if (Number.isNaN(amount) || amount === 0) return;
         
-        // Αν έχουμε έστω και ένα αρνητικό, αγνοούμε εντελώς τα θετικά νούμερα (είναι πιστώσεις)
         if (hasNegativeAmounts && amount > 0) return;
 
         const finalAmount = Math.abs(amount);
 
-        // 3. Εξαγωγή Περιγραφής / Κατηγορίας
         const desc = row[descIndex].replace(/"/g, '').trim();
         let category = desc;
         let comment = '';
@@ -1490,7 +1418,6 @@ ${descriptionsToCategorize.join('\n')}`;
             } else if (aiCategoryMap[descLow]) {
                 category = aiCategoryMap[descLow]; // Από το AI Map
             } else {
-                // Fallback
                 category = otherCategoryName;
                 const dLow = normalizeStr(desc);
                 for (const [catName, keywords] of Object.entries(BANK_CATEGORY_RULES)) {
@@ -1524,7 +1451,6 @@ ${descriptionsToCategorize.join('\n')}`;
         });
       });
 
-      // Συγχρονισμός των εισαγόμενων δεδομένων με το Cloud
       if (user && supabase) {
         if (newCategories.length > 0) {
           await supabase.from('categories').insert(newCategories.map(c => ({ ...c, user_id: user.id })));
@@ -1547,7 +1473,6 @@ ${descriptionsToCategorize.join('\n')}`;
       }
 
     } catch (error) {
-      console.error('Import error:', error);
       window.alert(t(locale, 'invalidCsv'));
     } finally {
       setIsImporting(false);
@@ -1586,7 +1511,6 @@ ${descriptionsToCategorize.join('\n')}`;
       const data = await res.json();
       setDraft(prev => ({ ...prev, receiptFileId: data.id }));
     } catch (e) {
-      console.error(e);
       window.alert('Αποτυχία ανεβάσματος στο Google Drive. Δοκίμασε ξανά.');
     } finally {
       setIsUploadingReceipt(false);
@@ -1635,7 +1559,6 @@ ${descriptionsToCategorize.join('\n')}`;
           headers: { Authorization: `Bearer ${session.provider_token}` }
         });
       } catch (e) {
-        console.error('Failed to delete from Drive', e);
       }
     }
   };
@@ -1878,895 +1801,113 @@ ${descriptionsToCategorize.join('\n')}`;
       </div>
 
       <main className="main-grid" style={{ marginTop: tab === 'home' ? '4px' : undefined }}>
-        {showDashboard && (
-          <>
-            {tab === 'home' && (
-              <section className="summary-grid">
-                {RANGE_OPTIONS.map((option) => (
-                  <button
-                    key={option}
-                    className={`summary-card ${range === option ? 'active' : ''}`}
-                    onClick={() => setRange(option)}
-                  >
-                    <span>{t(locale, option)}</span>
-                    <strong>{totals[option].toFixed(2)} €</strong>
-                  </button>
-                ))}
-              </section>
-            )}
-
-            {/* Filter Modal is now controlled by the Header button */}
-          </>
-        )}
-
         {tab === 'home' && (
-          <section className="panel list-panel">
-            {historyGroups.every((group) => group.items.length === 0) ? (
-              <div className="empty-state">
-                <p>{t(locale, 'noExpenses')}</p>
-                <span>{t(locale, 'addFirstExpense')}</span>
-              </div>
-            ) : (
-              historyGroups.map((group) => {
-                const expanded = expandedGroups[group.id] ?? group.isCurrent;
-                return (
-                  <article key={group.id} className="group-card">
-                    <button className="group-header" onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))}>
-                      <span>{group.title}</span>
-                      <strong>{group.total.toFixed(2)} €</strong>
-                    </button>
-                    {expanded && group.items.length > 0 && (
-                      <div className="group-body">
-                        {group.items.map((expense) => (
-                          <div key={expense.id} className={`expense-swipe ${swipedExpenseId === expense.id ? 'open' : ''}`}>
-                            <button className="expense-delete-action" onClick={() => handleDeleteExpense(expense.id)}>
-                              {t(locale, 'delete')}
-                            </button>
-                            <button
-                              className="expense-main"
-                              onTouchStart={(event) => handleExpenseTouchStart(expense.id, event.changedTouches[0].clientX)}
-                              onTouchEnd={(event) => handleExpenseTouchEnd(expense.id, event.changedTouches[0].clientX)}
-                              onClick={() => {
-                                if (swipedExpenseId === expense.id) {
-                                  setSwipedExpenseId(null);
-                                  return;
-                                }
-                                openEditExpense(expense);
-                              }}
-                            >
-                              <span className="expense-emoji">{expense.emoji}</span>
-                              <span className="expense-copy">
-                                <strong>{getLocalizedCategoryName(locale, expense.category)}</strong>
-                                <small>
-                                  {[expense.project, expense.date ? formatIsoDate(expense.date) : '', expense.comment?.trim()].filter(Boolean).join(' • ')}
-                                </small>
-                              </span>
-                              <strong style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                {expense.receiptFileId && (
-                                  <a
-                                    href={`https://drive.google.com/file/d/${expense.receiptFileId}/view`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    title="Προβολή απόδειξης"
-                                    style={{ fontSize: '16px', textDecoration: 'none' }}
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    🧾
-                                  </a>
-                                )}
-                                {expense.amount} €
-                              </strong>
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </article>
-                );
-              })
-            )}
-          </section>
+          <HomeMainView
+            locale={locale}
+            range={range}
+            ranges={RANGE_OPTIONS}
+            totals={totals}
+            showDashboard={showDashboard}
+            historyGroups={historyGroups}
+            expandedGroups={expandedGroups}
+            setExpandedGroups={setExpandedGroups}
+            setRange={setRange}
+            swipedExpenseId={swipedExpenseId}
+            setSwipedExpenseId={setSwipedExpenseId}
+            handleDeleteExpense={handleDeleteExpense}
+            handleExpenseTouchStart={handleExpenseTouchStart}
+            handleExpenseTouchEnd={handleExpenseTouchEnd}
+            openEditExpense={openEditExpense}
+          />
         )}
-
         {tab === 'analytics' && (
-          <>
-            <style>{`
-              .analytics-hero-grid::-webkit-scrollbar {
-                height: 6px;
-              }
-              .analytics-hero-grid::-webkit-scrollbar-track {
-                background: rgba(255, 255, 255, 0.05);
-                border-radius: 10px;
-              }
-              .analytics-hero-grid::-webkit-scrollbar-thumb {
-                background: rgba(255, 255, 255, 0.2);
-                border-radius: 10px;
-              }
-              .analytics-hero-grid {
-                padding-bottom: 12px !important;
-              }
-              @keyframes slideFromRight {
-                0% { transform: translateX(30px); opacity: 0; }
-                100% { transform: translateX(0); opacity: 1; }
-              }
-              @keyframes slideFromLeft {
-                0% { transform: translateX(-30px); opacity: 0; }
-                100% { transform: translateX(0); opacity: 1; }
-              }
-              .slide-left {
-                animation: slideFromRight 0.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-              }
-              .slide-right {
-                animation: slideFromLeft 0.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-              }
-            `}</style>
-            <section 
-              className="analytics-hero-grid analytics-top-gap"
-              ref={analyticsCarouselRef}
-              style={{ cursor: 'grab' }}
-              onMouseDown={(e) => {
-                if (!analyticsCarouselRef.current) return;
-                isAnalyticsDraggingRef.current = true;
-                isClickPreventedRef.current = false;
-                analyticsStartXRef.current = e.pageX - analyticsCarouselRef.current.offsetLeft;
-                analyticsScrollLeftRef.current = analyticsCarouselRef.current.scrollLeft;
-                analyticsCarouselRef.current.style.cursor = 'grabbing';
-                analyticsCarouselRef.current.style.scrollSnapType = 'none';
-              }}
-              onMouseLeave={() => {
-                isAnalyticsDraggingRef.current = false;
-                if (analyticsCarouselRef.current) {
-                  analyticsCarouselRef.current.style.cursor = 'grab';
-                  analyticsCarouselRef.current.style.scrollSnapType = 'x mandatory';
-                }
-              }}
-              onMouseUp={() => {
-                isAnalyticsDraggingRef.current = false;
-                if (analyticsCarouselRef.current) {
-                  analyticsCarouselRef.current.style.cursor = 'grab';
-                  analyticsCarouselRef.current.style.scrollSnapType = 'x mandatory';
-                }
-              }}
-              onMouseMove={(e) => {
-                if (!isAnalyticsDraggingRef.current || !analyticsCarouselRef.current) return;
-                e.preventDefault();
-                const x = e.pageX - analyticsCarouselRef.current.offsetLeft;
-                const walk = (x - analyticsStartXRef.current) * 1.5;
-                if (Math.abs(walk) > 5) isClickPreventedRef.current = true;
-                analyticsCarouselRef.current.scrollLeft = analyticsScrollLeftRef.current - walk;
-              }}
-              onClickCapture={(e) => {
-                if (isClickPreventedRef.current) {
-                  e.stopPropagation();
-                  e.preventDefault();
-                }
-              }}
-            onScroll={(e) => {
-              const target = e.currentTarget;
-              const scrollLeft = target.scrollLeft;
-              let newIndex = 0;
-              let minDiff = Infinity;
-              Array.from(target.children).forEach((child, i) => {
-                const childLeft = (child as HTMLElement).offsetLeft - target.offsetLeft;
-                const diff = Math.abs(childLeft - scrollLeft);
-                if (diff < minDiff) {
-                  minDiff = diff;
-                  newIndex = i;
-                }
-              });
-              if (activeAnalyticsSlide !== newIndex) {
-                setActiveAnalyticsSlide(newIndex);
-              }
-            }}
-            >
-              <article
-                className={`panel analytics-hero-card analytics-pace-card ${budgetPaceView.mode === 'chart' ? 'analytics-openable-card' : ''}`}
-                role={budgetPaceView.mode === 'chart' ? 'button' : undefined}
-                tabIndex={budgetPaceView.mode === 'chart' ? 0 : undefined}
-                onClick={() => {
-                  if (budgetPaceView.mode === 'chart') setAnalyticsModal('pace');
-                }}
-                onKeyDown={(event) => {
-                  if (budgetPaceView.mode === 'chart' && (event.key === 'Enter' || event.key === ' ')) {
-                    event.preventDefault();
-                    setAnalyticsModal('pace');
-                  }
-                }}
-              >
-                <p className="panel-label">{t(locale, 'analyticsBudgetPaceTitle')}</p>
-                <div className="analytics-kpi-compact">
-                  <strong className={budgetPaceDelta > 0 ? 'danger' : 'success'}>
-                    {Math.abs(budgetPaceDelta).toFixed(0)}€
-                  </strong>
-                  <small>{t(locale, budgetPaceView.paceTextKey)}</small>
-                </div>
-                {budgetPaceView.mode === 'chart' && (
-                  <>
-                    <div className="analytics-line-wrap">
-                      <svg className="analytics-line-chart" viewBox="0 0 100 60" preserveAspectRatio="none" aria-hidden="true">
-                        <polyline className="analytics-line expected" points={budgetPaceView.chart.expectedPoints} />
-                        <polyline className="analytics-line" points={budgetPaceView.chart.forecastPoints} strokeDasharray="3 3" style={{ stroke: '#0a84ff', strokeWidth: 1.5, fill: 'none', opacity: 0.6 }} />
-                        <polyline className="analytics-line actual" points={budgetPaceView.chart.actualPoints} />
-                        <circle
-                          cx={budgetPaceView.chart.actualEndX}
-                          cy={budgetPaceView.chart.actualEndY}
-                          r="2"
-                          fill="#0a84ff"
-                        />
-                      </svg>
-                    </div>
-                    <div className="analytics-line-legend">
-                      <span><i className="line-swatch expected" />{t(locale, 'analyticsExpectedLine')}</span>
-                      <span><i className="line-swatch actual" />{t(locale, 'analyticsActualLine')}</span>
-                    </div>
-                  </>
-                )}
-                {budgetPaceView.mode === 'day' && (
-              <>
-                <div className="analytics-line-wrap" style={{ padding: '0 4px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                  <div style={{ position: 'relative', width: '100%', height: '10px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '5px', margin: '24px 0' }}>
-                    
-                    <div style={{
-                      position: 'absolute',
-                      top: '-22px',
-                      left: `${budgetPaceDayActualPct}%`,
-                      transform: budgetPaceDayActualPct > 85 ? 'translateX(-100%)' : budgetPaceDayActualPct < 15 ? 'translateX(0)' : 'translateX(-50%)',
-                      color: '#fff',
-                      fontSize: '12px',
-                      fontWeight: '700',
-                      transition: 'left 0.4s ease, transform 0.4s ease'
-                    }}>
-                      {budgetPaceActual.toFixed(2)}€
-                    </div>
-
-                    <div style={{
-                      position: 'absolute',
-                      top: '16px',
-                      left: `${budgetPaceDayTargetPct}%`,
-                      transform: budgetPaceDayTargetPct > 85 ? 'translateX(-100%)' : budgetPaceDayTargetPct < 15 ? 'translateX(0)' : 'translateX(-50%)',
-                      color: '#8e8e93',
-                      fontSize: '11px',
-                      fontWeight: '600'
-                    }}>
-                      {budgetPaceTarget.toFixed(2)}€
-                    </div>
-
-                    <div style={{
-                      position: 'absolute', top: 0, left: 0, height: '100%',
-                      width: `${budgetPaceDayActualPct}%`,
-                      minWidth: '6px',
-                      backgroundColor: '#0a84ff',
-                      borderRadius: '5px',
-                      transition: 'width 0.4s ease'
-                    }} />
-                    <div style={{
-                      position: 'absolute', top: '-4px', bottom: '-4px',
-                      left: `calc(${budgetPaceDayTargetPct}% - 1.5px)`,
-                      width: '3px',
-                      backgroundColor: '#8e8e93',
-                      borderRadius: '2px',
-                      boxShadow: '0 0 4px rgba(0,0,0,0.5)',
-                      zIndex: 2
-                    }} />
-                  </div>
-                </div>
-                <div className="analytics-line-legend">
-                  <span><i className="line-swatch expected" />{t(locale, 'analyticsExpectedLine')}</span>
-                  <span><i className="line-swatch actual" />{t(locale, 'analyticsActualLine')}</span>
-                </div>
-              </>
-                )}
-                {budgetPaceView.mode === 'disabled' && (
-                  <p className="analytics-pace-note">{t(locale, 'analyticsPaceYearDisabled')}</p>
-                )}
-              </article>
-
-              <article className="panel analytics-hero-card">
-                <p className="panel-label">{t(locale, 'analyticsComparisonTitle')}</p>
-                
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', marginBottom: '20px', marginTop: '4px' }}>
-                  <strong style={{ fontSize: '28px', lineHeight: '1', color: isComparisonMore ? '#ff453a' : isComparisonLess ? '#32d74b' : '#8e8e93' }}>
-                    {isComparisonMore ? '+' : isComparisonLess ? '-' : ''}{Math.abs(comparisonPct).toFixed(0)}%
-                  </strong>
-                  <span style={{ color: '#8e8e93', fontSize: '13px', paddingBottom: '3px', fontWeight: '500' }}>
-                    {isComparisonMore ? t(locale, 'analyticsMore') : isComparisonLess ? t(locale, 'analyticsLess') : t(locale, 'analyticsSame')}
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {/* Previous Bar */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#8e8e93', fontWeight: '500' }}>
-                      <span>{t(locale, prevLabelKey)}</span>
-                      <span>{prevTotal.toFixed(0)}€</span>
-                    </div>
-                    <div style={{ width: '100%', background: 'rgba(255,255,255,0.05)', height: '10px', borderRadius: '5px', overflow: 'hidden' }}>
-                      <div style={{ width: `${prevBarPct}%`, background: '#8e8e93', height: '100%', borderRadius: '5px', transition: 'width 0.5s ease-out' }} />
-                    </div>
-                  </div>
-
-                  {/* Current Bar */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#fff', fontWeight: '600' }}>
-                      <span>{t(locale, 'analyticsCurrent')}</span>
-                      <span>{currentTotal.toFixed(0)}€</span>
-                    </div>
-                    <div style={{ width: '100%', background: 'rgba(255,255,255,0.05)', height: '10px', borderRadius: '5px', overflow: 'hidden' }}>
-                      <div style={{ width: `${currentBarPct}%`, background: isComparisonMore ? '#ff453a' : isComparisonLess ? '#32d74b' : '#0a84ff', height: '100%', borderRadius: '5px', transition: 'width 0.5s ease-out' }} />
-                    </div>
-                  </div>
-                </div>
-              </article>
-
-              <article
-                className="panel analytics-hero-card analytics-openable-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => setAnalyticsModal('donut')}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    setAnalyticsModal('donut');
-                  }
-                }}
-              >
-                <p className="panel-label">{t(locale, 'analyticsCategorySplitTitle')}</p>
-                <div
-                  className="analytics-donut"
-                  style={{
-                    background: categoryDonut.total > 0 ? `conic-gradient(${categoryDonut.gradient})` : 'conic-gradient(#2c2c2e 0% 100%)',
-                  }}
-                >
-                  <span>{categoryDonut.total > 0 ? `${categoryDonut.total.toFixed(0)}€` : '0€'}</span>
-                </div>
-              </article>
-
-              {range === 'month' && monthHeatmapData && (
-                <article 
-                  className="panel analytics-hero-card analytics-openable-card"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    setSeamlessHeatmapTransition(false);
-                  setHeatmapSlideDir('');
-                    setAnalyticsModal('heatmap');
-                    const now = new Date();
-                    setHeatmapViewDate(new Date(now.getFullYear(), now.getMonth(), 1));
-                    setActiveHeatmapDay(new Date().getDate());
-                  }}
-                >
-                  <p className="panel-label">{t(locale, 'analyticsSpendingHeatmap')}</p>
-                  <p className="heatmap-card-month-label">
-                    {getLocalizedMonthAcc(locale, monthHeatmapData.month)} {monthHeatmapData.year}
-                  </p>
-                  <div className="heatmap-card-weekdays">
-                    {locale === 'el' ? ['Δ', 'Τ', 'Τ', 'Π', 'Π', 'Σ', 'Κ'].map((d, i) => <span key={i}>{d}</span>) : ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span key={i}>{d}</span>)}
-                  </div>
-                  <div className="heatmap-card-grid">
-                    {Array.from({ length: monthHeatmapData.firstDayDow }).map((_, i) => (
-                      <div key={`empty-${i}`} className="heatmap-card-empty" />
-                    ))}
-                    {monthHeatmapData.dailySpend.map((amount, index) => {
-                      const dayOfMonth = index + 1;
-                      let bgColor = '#2c2c2e'; 
-                      if (amount > 0) {
-                        const ratio = amount / monthHeatmapData.maxSpend;
-                        if (ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
-                        else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
-                        else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
-                        else bgColor = '#ff453a';
-                      }
-                      
-                      const isToday = new Date().getDate() === dayOfMonth;
-                      
-                      return (
-                        <div
-                          key={`day-${dayOfMonth}`}
-                          title={`${dayOfMonth}: ${amount.toFixed(2)}€`}
-                          style={{
-                            background: bgColor,
-                            aspectRatio: '1/1',
-                            borderRadius: '5px',
-                            border: isToday ? '1px solid rgba(255, 255, 255, 0.8)' : '1px solid rgba(255,255,255,0.05)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: 'clamp(9px, 1.6vw, 11px)',
-                            color: amount > monthHeatmapData.maxSpend * 0.5 ? '#fff' : 'rgba(255,255,255,0.7)',
-                            fontWeight: isToday ? 'bold' : 'normal'
-                          }}
-                        >
-                          {dayOfMonth}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="heatmap-card-legend">
-                    <span>{t(locale, 'heatmapLow')}</span>
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#2c2c2e' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.25)' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.5)' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.75)' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#ff453a' }} />
-                    <span>{t(locale, 'heatmapHigh')}</span>
-                  </div>
-                </article>
-              )}
-
-              {range === 'week' && weekHeatmapData && (
-                <article
-                  className="panel analytics-hero-card analytics-openable-card week-heatmap-card"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    setSeamlessHeatmapTransition(false);
-                    setWeekHeatmapSlideDir('');
-                    const now = new Date();
-                    const weekStart = new Date(now);
-                    weekStart.setHours(0, 0, 0, 0);
-                    const isoDow0Mon = (weekStart.getDay() + 6) % 7;
-                    weekStart.setDate(weekStart.getDate() - isoDow0Mon);
-                    setWeekHeatmapViewStartDate(weekStart);
-                    setActiveWeekHeatmapDayIndex(isoDow0Mon);
-                    setAnalyticsModal('weekHeatmap');
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setWeekHeatmapSlideDir('');
-                      const now = new Date();
-                      const weekStart = new Date(now);
-                      weekStart.setHours(0, 0, 0, 0);
-                      const isoDow0Mon = (weekStart.getDay() + 6) % 7;
-                      weekStart.setDate(weekStart.getDate() - isoDow0Mon);
-                      setWeekHeatmapViewStartDate(weekStart);
-                      setActiveWeekHeatmapDayIndex(isoDow0Mon);
-                      setAnalyticsModal('weekHeatmap');
-                    }
-                  }}
-                >
-                  <p className="panel-label">{t(locale, 'analyticsSpendingHeatmap')}</p>
-                  <p className="heatmap-card-month-label">
-                    {`${weekHeatmapData.days[0].getDate()}/${weekHeatmapData.days[0].getMonth() + 1} - ${weekHeatmapData.days[6].getDate()}/${weekHeatmapData.days[6].getMonth() + 1}`}
-                  </p>
-                  <div className="week-heatmap-grid" style={{ margin: 'auto 0', justifyContent: 'center' }}>
-                    {weekHeatmapData.dailySpend.map((amount, index) => {
-                      const ratio = amount > 0 ? amount / weekHeatmapData.maxSpend : 0;
-                      let bgColor = '#2c2c2e';
-                      if (ratio > 0 && ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
-                      else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
-                      else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
-                      else if (ratio > 0.75) bgColor = '#ff453a';
-
-                      const day = weekHeatmapData.days[index];
-                      return (
-                        <div key={`week_day_${index}`} className="week-heatmap-cell" style={{ background: bgColor }}>
-                          <span>{day.getDate()}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="heatmap-card-legend">
-                    <span>{t(locale, 'heatmapLow')}</span>
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#2c2c2e' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.25)' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.5)' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.75)' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#ff453a' }} />
-                    <span>{t(locale, 'heatmapHigh')}</span>
-                  </div>
-                </article>
-              )}
-
-              {range === 'year' && yearHeatmapData && (
-                <article
-                  className="panel analytics-hero-card analytics-openable-card year-heatmap-card"
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    setSeamlessHeatmapTransition(false);
-                    setYearHeatmapSlideDir('');
-                    setActiveYearHeatmapMonth(new Date().getMonth());
-                    setAnalyticsModal('yearHeatmap');
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setSeamlessHeatmapTransition(false);
-                      setYearHeatmapSlideDir('');
-                      setActiveYearHeatmapMonth(new Date().getMonth());
-                      setAnalyticsModal('yearHeatmap');
-                    }
-                  }}
-                >
-                  <p className="panel-label">{t(locale, 'analyticsSpendingHeatmap')}</p>
-                  <p className="heatmap-card-month-label">{yearHeatmapData.year}</p>
-                  <div className="year-heatmap-grid" style={{ margin: 'auto 0', justifyContent: 'center' }}>
-                    {yearHeatmapData.monthlySpend.map((amount, monthIndex) => {
-                      const ratio = amount > 0 ? amount / yearHeatmapData.maxSpend : 0;
-                      let bgColor = '#2c2c2e';
-                      if (ratio > 0 && ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
-                      else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
-                      else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
-                      else if (ratio > 0.75) bgColor = '#ff453a';
-
-                      return (
-                        <div key={`year_month_${monthIndex}`} className="year-heatmap-cell" style={{ background: bgColor }}>
-                          <span>{locale === 'el' ? YEAR_HEATMAP_MONTH_LABELS_EL[monthIndex] : YEAR_HEATMAP_MONTH_LABELS_EN[monthIndex]}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="heatmap-card-legend">
-                    <span>{t(locale, 'heatmapLow')}</span>
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#2c2c2e' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.25)' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.5)' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.75)' }} />
-                    <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#ff453a' }} />
-                    <span>{t(locale, 'heatmapHigh')}</span>
-                  </div>
-                </article>
-              )}
-            </section>
-
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', paddingBottom: '16px', marginTop: '-4px' }}>
-              {Array.from({ length: range === 'day' ? 3 : 4 }).map((_, idx) => (
-                <div
-                  key={`analytics-dot-${idx}`}
-                  style={{
-                    width: activeAnalyticsSlide === idx ? '16px' : '6px',
-                    height: '6px',
-                    borderRadius: '3px',
-                    backgroundColor: activeAnalyticsSlide === idx ? '#f5f5f7' : '#48484a',
-                    transition: 'all 0.3s ease',
-                    cursor: 'pointer'
-                  }}
-                  onClick={() => {
-                    const target = analyticsCarouselRef.current;
-                    if (target && target.children[idx]) {
-                      const child = target.children[idx] as HTMLElement;
-                      target.scrollTo({ left: child.offsetLeft - target.offsetLeft, behavior: 'smooth' });
-                    }
-                  }}
-                />
-              ))}
-            </div>
-
-            {hasActiveFilter && (
-              <section className="toolbar-row">
-                <p className="filter-pill">
-                  {t(locale, 'activeFilters')}:{' '}
-                  {fromDate ? formatIsoDate(fromDate) : '—'} /{' '}
-                  {toDate ? formatIsoDate(toDate) : '—'} /{' '}
-                  {categoryFilterLabel || t(locale, 'allCategories')} /{' '}
-                  {projectFilterLabel}
-                </p>
-              </section>
-            )}
-
-            <section className="panel list-panel">
-              {analyticsGroups.map((group) => {
-                const expanded = expandedGroups[group.id] ?? group.isCurrent;
-                const aggregate: Record<string, { amount: number; emoji: string }> = {};
-                group.items.forEach((expense) => {
-                  const key = getLocalizedCategoryName(locale, expense.category || t(locale, 'other'));
-                  if (!aggregate[key]) aggregate[key] = { amount: 0, emoji: expense.emoji || '🏷️' };
-                  aggregate[key].amount += Number.parseFloat(expense.amount) || 0;
-                });
-                const rows = Object.entries(aggregate)
-                  .map(([name, data]) => ({ name, ...data }))
-                  .sort((a, b) => b.amount - a.amount);
-                const maxAmount = rows[0]?.amount ?? 0;
-                const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
-
-                return (
-                  <article key={group.id} className="group-card">
-                    <button className="group-header" onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))}>
-                      <span>{group.title}</span>
-                      <strong>{totalAmount.toFixed(2)} €</strong>
-                    </button>
-                    {expanded && (
-                      <div className="group-body">
-                        {rows.length === 0 ? (
-                          <p className="empty-line">{t(locale, 'noExpenses')}</p>
-                        ) : (
-                          rows.map((row) => {
-                            const fillPct = maxAmount > 0 ? Math.max(1, (row.amount / maxAmount) * 100) : 0;
-                            const isTightBar = fillPct <= 30;
-                            return (
-                              <div key={`${group.id}_${row.name}`} className="bar-row">
-                                <div className="bar-label">
-                                  <span>{row.emoji}</span>
-                                  <strong>{row.name}</strong>
-                                </div>
-                                <div className="bar-track">
-                                  <div className={`bar-fill ${isTightBar ? 'tight' : ''}`} style={{ width: `${fillPct}%` }}>
-                                    {row.amount.toFixed(0)} €
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
-            </section>
-          </>
+          <AnalyticsMainView
+            locale={locale}
+            range={range}
+            analyticsCarouselRef={analyticsCarouselRef}
+            isAnalyticsDraggingRef={isAnalyticsDraggingRef}
+            isClickPreventedRef={isClickPreventedRef}
+            analyticsStartXRef={analyticsStartXRef}
+            analyticsScrollLeftRef={analyticsScrollLeftRef}
+            activeAnalyticsSlide={activeAnalyticsSlide}
+            setActiveAnalyticsSlide={setActiveAnalyticsSlide}
+            budgetPaceView={budgetPaceView}
+            budgetPaceDelta={budgetPaceDelta}
+            setAnalyticsModal={setAnalyticsModal}
+            budgetPaceDayActualPct={budgetPaceDayActualPct}
+            budgetPaceActual={budgetPaceActual}
+            budgetPaceDayTargetPct={budgetPaceDayTargetPct}
+            budgetPaceTarget={budgetPaceTarget}
+            isComparisonMore={isComparisonMore}
+            isComparisonLess={isComparisonLess}
+            comparisonPct={comparisonPct}
+            prevLabelKey={prevLabelKey}
+            prevTotal={prevTotal}
+            prevBarPct={prevBarPct}
+            currentTotal={currentTotal}
+            currentBarPct={currentBarPct}
+            categoryDonut={categoryDonut}
+            monthHeatmapData={monthHeatmapData}
+            setSeamlessHeatmapTransition={setSeamlessHeatmapTransition}
+            setHeatmapSlideDir={setHeatmapSlideDir}
+            setHeatmapViewDate={setHeatmapViewDate}
+            setActiveHeatmapDay={setActiveHeatmapDay}
+            weekHeatmapData={weekHeatmapData}
+            setWeekHeatmapSlideDir={setWeekHeatmapSlideDir}
+            setWeekHeatmapViewStartDate={setWeekHeatmapViewStartDate}
+            setActiveWeekHeatmapDayIndex={setActiveWeekHeatmapDayIndex}
+            yearHeatmapData={yearHeatmapData}
+            setYearHeatmapSlideDir={setYearHeatmapSlideDir}
+            setActiveYearHeatmapMonth={setActiveYearHeatmapMonth}
+            hasActiveFilter={hasActiveFilter}
+            fromDate={fromDate}
+            toDate={toDate}
+            categoryFilterLabel={categoryFilterLabel}
+            projectFilterLabel={projectFilterLabel}
+            analyticsGroups={analyticsGroups}
+            analyticsCategoryUniverse={analyticsCategoryUniverse}
+            expandedGroups={expandedGroups}
+            setExpandedGroups={setExpandedGroups}
+          />
         )}
 
         {tab === 'settings' && (
-          <section className="settings-grid">
-            <section className="panel">
-              <div className="settings-header" style={{ marginBottom: '16px' }}>
-                <h3>{t(locale, 'budgetShort')}</h3>
-              </div>
-              
-              <div style={{ background: '#111214', border: '1px solid #2c2c2e', borderRadius: '16px', overflow: 'hidden' }}>
-                <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderBottom: '1px solid #2c2c2e', cursor: 'pointer' }}>
-                  <span style={{ fontSize: '15px', fontWeight: '500', color: '#f5f5f7' }}>{t(locale, 'monthly')}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <input
-                      type="number"
-                      min="0"
-                      step="50"
-                      value={budgetInputValue}
-                      onChange={(event) => setBudgetInputValue(event.target.value)}
-                      onFocus={(event) => { if (event.target.value === '0') setBudgetInputValue(''); }}
-                      onBlur={() => { if (budgetInputValue === '') setBudgetInputValue('0'); }}
-                      style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '16px', fontWeight: '600', textAlign: 'right', width: '100px', outline: 'none', padding: 0 }}
-                    />
-                    <span style={{ fontSize: '16px', color: '#8e8e93', fontWeight: '500' }}>€</span>
-                  </div>
-                </label>
-
-                <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', cursor: 'pointer' }}>
-                  <span style={{ fontSize: '15px', fontWeight: '500', color: '#f5f5f7' }}>{t(locale, 'yearly')}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '6px 12px', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                    <input
-                      type="number"
-                      min="0"
-                      step="100"
-                      value={yearlyBudgetInputValue}
-                      onChange={(event) => setYearlyBudgetInputValue(event.target.value)}
-                      onFocus={(event) => { if (event.target.value === '0') setYearlyBudgetInputValue(''); }}
-                      onBlur={() => { if (yearlyBudgetInputValue === '') setYearlyBudgetInputValue('0'); }}
-                      style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '16px', fontWeight: '600', textAlign: 'right', width: '100px', outline: 'none', padding: 0 }}
-                    />
-                    <span style={{ fontSize: '16px', color: '#8e8e93', fontWeight: '500' }}>€</span>
-                  </div>
-                </label>
-              </div>
-
-              {(Number(budgetInputValue) !== income || Number(yearlyBudgetInputValue) !== yearlyBudget) && (
-                <button className="primary-btn" style={{ marginTop: '14px', width: '100%', borderRadius: '14px', padding: '14px', fontSize: '16px' }} onClick={handleSaveBudget}>
-                  {t(locale, 'save')}
-                </button>
-              )}
-            </section>
-            <section className="panel">
-              <div className="settings-header">
-                <h3>{t(locale, 'projects')}</h3>
-                <button className="ghost-btn" onClick={openProjectModal}>
-                  {t(locale, 'add')}
-                </button>
-              </div>
-              <div className="category-manage-list">
-                {projects.length === 0 ? (
-                  <p className="empty-line">{t(locale, 'noProjects')}</p>
-                ) : (
-                  projects.map((project) => (
-                    <div key={project.id}>
-                      <div
-                        className="category-manage-row editable-row manage-main"
-                        style={{ paddingRight: '8px' }}
-                      >
-                        {editingProjectId === project.id ? (
-                          <>
-                            <div className="category-manage-copy">
-                              <input
-                                value={editingProjectName}
-                                onChange={(event) => setEditingProjectName(event.target.value)}
-                                onClick={(event) => event.stopPropagation()}
-                                onBlur={() => handleRenameProject(project.id)}
-                                onKeyDown={(event) =>
-                                  handleManageInputKeyDown(
-                                    event,
-                                    () => handleRenameProject(project.id),
-                                    () => {
-                                      setEditingProjectId(null);
-                                      setEditingProjectName('');
-                                    }
-                                  )
-                                }
-                                autoFocus
-                              />
-                            </div>
-                            <button
-                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleRenameProject(project.id);
-                              }}
-                            >
-                              <svg viewBox="0 0 24 24" width="18" height="18" stroke="#32d74b" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <div className="category-manage-copy">
-                              <strong>{project.name}</strong>
-                            </div>
-                            <button
-                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', marginRight: '4px' }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleDeleteProjectFromSettings(project.id);
-                              }}
-                            >
-                              <svg viewBox="0 0 24 24" width="18" height="18" stroke="#ff453a" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                            </button>
-                            <button
-                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setEditingProjectId(project.id);
-                                setEditingProjectName(project.name);
-                              }}
-                            >
-                              <svg viewBox="0 0 24 24" width="16" height="16" stroke="#0a84ff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M12 20h9" />
-                                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                              </svg>
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-            <section className="panel">
-              <div className="settings-header">
-                <h3>{t(locale, 'manageCategories')}</h3>
-                <button className="ghost-btn" onClick={() => openCategoryModal(false)}>
-                  {t(locale, 'add')}
-                </button>
-              </div>
-              <div className="category-manage-list">
-                {customCategories.length === 0 ? (
-                  <p className="empty-line">{t(locale, 'noCustomCategories')}</p>
-                ) : (
-                  withDisplayName(locale, customCategories).map((category) => (
-                    <div key={category.id}>
-                      <div
-                        className="category-manage-row editable-row manage-main"
-                        style={{ paddingRight: '8px' }}
-                      >
-                        {editingCategoryId === category.id ? (
-                          <>
-                            <div className="category-manage-copy">
-                              <span className="category-manage-emoji">{category.emoji}</span>
-                              <input
-                                value={editingCategoryName}
-                                onChange={(event) => setEditingCategoryName(event.target.value)}
-                                onClick={(event) => event.stopPropagation()}
-                                onBlur={() => handleRenameCategory(category.id)}
-                                onKeyDown={(event) =>
-                                  handleManageInputKeyDown(
-                                    event,
-                                    () => handleRenameCategory(category.id),
-                                    () => {
-                                      setEditingCategoryId(null);
-                                      setEditingCategoryName('');
-                                    }
-                                  )
-                                }
-                                autoFocus
-                              />
-                            </div>
-                            <button
-                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleRenameCategory(category.id);
-                              }}
-                            >
-                              <svg viewBox="0 0 24 24" width="18" height="18" stroke="#32d74b" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <div className="category-manage-copy">
-                              <span className="category-manage-emoji">{category.emoji}</span>
-                              <strong>{category.displayName}</strong>
-                            </div>
-                            <button
-                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', marginRight: '4px' }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleDeleteCategoryFromSettings(category.id);
-                              }}
-                            >
-                              <svg viewBox="0 0 24 24" width="18" height="18" stroke="#ff453a" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                            </button>
-                            <button
-                              style={{ background: 'none', border: 'none', padding: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setEditingCategoryId(category.id);
-                                setEditingCategoryName(category.name);
-                              }}
-                            >
-                              <svg viewBox="0 0 24 24" width="16" height="16" stroke="#0a84ff" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M12 20h9" />
-                                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                              </svg>
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-            <section className="panel">
-              <h3>{t(locale, 'manageData')}</h3>
-              <div className="settings-actions">
-                <button className="settings-card" onClick={handleImportClick}>
-                  <strong>{t(locale, 'importCsv')}</strong>
-                  <span>{t(locale, 'importCsvDesc')}</span>
-                </button>
-        <button className="settings-card" onClick={() => setExportModalOpen(true)}>
-                  <strong>{t(locale, 'exportCsv')}</strong>
-                  <span>{t(locale, 'exportCsvDesc')}</span>
-                </button>
-                <button className="settings-card" onClick={() => setBulkDeleteModalOpen(true)}>
-                  <strong style={{ color: '#ff453a' }}>{t(locale, 'bulkDelete')}</strong>
-                  <span>{t(locale, 'bulkDeleteDesc')}</span>
-                </button>
-              </div>
-            </section>
-            <section className="panel">
-              <div className="settings-header">
-                <div>
-                  <h3>{t(locale, 'background')}</h3>
-                </div>
-                <button className="ghost-btn" onClick={() => setBackgroundModalOpen(true)}>
-                  {t(locale, 'chooseBackground')}
-                </button>
-              </div>
-            </section>
-            <section className="panel">
-              <div className="settings-header">
-                <div>
-                  <h3>{t(locale, 'language')}</h3>
-                  <p>{t(locale, 'appLanguageHint')}</p>
-                </div>
-                <div className="lang-switch">
-                  <button className={locale === 'en' ? 'active' : ''} onClick={() => setLocale('en')}>EN</button>
-                  <button className={locale === 'el' ? 'active' : ''} onClick={() => setLocale('el')}>GR</button>
-                </div>
-              </div>
-            </section>
-            <section className="panel">
-              <div className="settings-header">
-                <div>
-                  <h3>{t(locale, 'signedInAs')}</h3>
-                  <p>{user.email}</p>
-                </div>
-                <button className="ghost-btn" onClick={handleSignOut}>
-                  {t(locale, 'signOut')}
-                </button>
-              </div>
-            </section>
-            <input ref={importInputRef} className="hidden-input" type="file" accept=".csv,text/csv" onChange={handleImportCsv} />
-          </section>
+          <SettingsView
+            locale={locale}
+            budgetInputValue={budgetInputValue}
+            setBudgetInputValue={setBudgetInputValue}
+            yearlyBudgetInputValue={yearlyBudgetInputValue}
+            setYearlyBudgetInputValue={setYearlyBudgetInputValue}
+            income={income}
+            yearlyBudget={yearlyBudget}
+            handleSaveBudget={handleSaveBudget}
+            projects={projects}
+            openProjectModal={openProjectModal}
+            editingProjectId={editingProjectId}
+            editingProjectName={editingProjectName}
+            setEditingProjectName={setEditingProjectName}
+            handleRenameProject={handleRenameProject}
+            handleManageInputKeyDown={handleManageInputKeyDown}
+            setEditingProjectId={setEditingProjectId}
+            handleDeleteProjectFromSettings={handleDeleteProjectFromSettings}
+            customCategories={customCategories}
+            openCategoryModal={openCategoryModal}
+            editingCategoryId={editingCategoryId}
+            editingCategoryName={editingCategoryName}
+            setEditingCategoryName={setEditingCategoryName}
+            handleRenameCategory={handleRenameCategory}
+            setEditingCategoryId={setEditingCategoryId}
+            handleDeleteCategoryFromSettings={handleDeleteCategoryFromSettings}
+            handleImportClick={handleImportClick}
+            setExportModalOpen={setExportModalOpen}
+            setBulkDeleteModalOpen={setBulkDeleteModalOpen}
+            setBackgroundModalOpen={setBackgroundModalOpen}
+            setLocale={setLocale}
+            user={user}
+            handleSignOut={handleSignOut}
+            importInputRef={importInputRef}
+            handleImportCsv={handleImportCsv}
+          />
         )}
       </main>
 
@@ -2818,7 +1959,7 @@ ${descriptionsToCategorize.join('\n')}`;
             onPointerUp={handleFabPointerUp}
             onPointerLeave={handleFabPointerCancel}
             onPointerCancel={handleFabPointerCancel}
-            onContextMenu={(e) => e.preventDefault()} // Αποτροπή εμφάνισης μενού του browser
+            onContextMenu={(e) => e.preventDefault()}
             style={{
             position: 'fixed',
             bottom: '40px',
@@ -2843,7 +1984,17 @@ ${descriptionsToCategorize.join('\n')}`;
           }}
           title={t(locale, 'addExpense')}
         >
-          <span style={{ marginTop: '-4px' }}>+</span>
+          {fabMenuOpen ? (
+            <svg className="fab-button-symbol" viewBox="0 0 24 24" aria-hidden="true">
+              <line x1="6" y1="6" x2="18" y2="18" />
+              <line x1="18" y1="6" x2="6" y2="18" />
+            </svg>
+          ) : (
+            <svg className="fab-button-symbol" viewBox="0 0 24 24" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          )}
         </button>
         </>
       )}
@@ -3126,6 +2277,7 @@ ${descriptionsToCategorize.join('\n')}`;
             className={`modal-card analytics-modal-card ${seamlessHeatmapTransition ? 'modal-no-pop' : ''}`}
             style={{ maxWidth: '400px', margin: 'auto', left: 0, right: 0 }}
             onClick={(event) => event.stopPropagation()}
+            {...monthHeatmapSwipe}
           >
             <div className="analytics-modal-header">
               <div>
@@ -3169,14 +2321,7 @@ ${descriptionsToCategorize.join('\n')}`;
               ))}
               {monthHeatmapData.dailySpend.map((amount, index) => {
                 const dayOfMonth = index + 1;
-                let bgColor = '#2c2c2e'; 
-                if (amount > 0) {
-                  const ratio = amount / monthHeatmapData.maxSpend;
-                  if (ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
-                  else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
-                  else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
-                  else bgColor = '#ff453a';
-                }
+                const bgColor = getHeatmapColor(amount, monthHeatmapData.maxSpend);
                 
                 const isToday = new Date().getDate() === dayOfMonth && new Date().getMonth() === monthHeatmapData.month;
                 const isSelected = activeHeatmapDay === dayOfMonth;
@@ -3212,15 +2357,7 @@ ${descriptionsToCategorize.join('\n')}`;
               ))}
             </div>
 
-            <div className="heatmap-card-legend" style={{ justifyContent: 'center', marginTop: '16px', marginBottom: '4px' }}>
-              <span>{t(locale, 'heatmapLow')}</span>
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#2c2c2e' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.25)' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.5)' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.75)' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#ff453a' }} />
-              <span>{t(locale, 'heatmapHigh')}</span>
-            </div>
+            <HeatmapLegend locale={locale} className="heatmap-card-legend" />
 
             <div style={{ marginTop: '24px', padding: '16px', background: '#111214', borderRadius: '16px', border: '1px solid #2c2c2e', height: '260px', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -3264,6 +2401,7 @@ ${descriptionsToCategorize.join('\n')}`;
             className="modal-card analytics-modal-card"
             style={{ maxWidth: '400px', margin: 'auto', left: 0, right: 0 }}
             onClick={(event) => event.stopPropagation()}
+            {...weekHeatmapSwipe}
           >
             <div className="analytics-modal-header">
               <div>
@@ -3304,12 +2442,7 @@ ${descriptionsToCategorize.join('\n')}`;
             >
             <div style={{ display: 'flex', gap: '6px', width: '100%', justifyContent: 'space-between' }}>
               {weekHeatmapData.dailySpend.map((amount, dayIndex) => {
-                const ratio = amount > 0 ? amount / weekHeatmapData.maxSpend : 0;
-                let bgColor = '#2c2c2e';
-                if (ratio > 0 && ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
-                else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
-                else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
-                else if (ratio > 0.75) bgColor = '#ff453a';
+                const bgColor = getHeatmapColor(amount, weekHeatmapData.maxSpend);
                 const dayDate = weekHeatmapData.days[dayIndex];
                 const isToday = new Date().toDateString() === dayDate.toDateString();
                 const isSelected = activeWeekHeatmapDayIndex === dayIndex;
@@ -3351,15 +2484,7 @@ ${descriptionsToCategorize.join('\n')}`;
               })}
             </div>
 
-            <div className="heatmap-card-legend" style={{ justifyContent: 'center', marginTop: '16px', marginBottom: '4px' }}>
-              <span>{t(locale, 'heatmapLow')}</span>
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#2c2c2e' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.25)' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.5)' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.75)' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#ff453a' }} />
-              <span>{t(locale, 'heatmapHigh')}</span>
-            </div>
+            <HeatmapLegend locale={locale} className="heatmap-card-legend" />
 
             <div style={{ marginTop: '16px', padding: '14px', background: '#111214', borderRadius: '14px', border: '1px solid #2c2c2e', height: '240px', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -3407,6 +2532,7 @@ ${descriptionsToCategorize.join('\n')}`;
             className="modal-card analytics-modal-card"
             style={{ maxWidth: '460px', margin: 'auto', left: 0, right: 0 }}
             onClick={(event) => event.stopPropagation()}
+            {...yearHeatmapSwipe}
           >
             <div className="analytics-modal-header">
               <div>
@@ -3441,12 +2567,7 @@ ${descriptionsToCategorize.join('\n')}`;
             >
             <div className="year-heatmap-modal-grid">
               {yearHeatmapData.monthlySpend.map((amount, monthIndex) => {
-                const ratio = amount > 0 ? amount / yearHeatmapData.maxSpend : 0;
-                let bgColor = '#2c2c2e';
-                if (ratio > 0 && ratio <= 0.25) bgColor = 'rgba(255, 69, 58, 0.25)';
-                else if (ratio <= 0.5) bgColor = 'rgba(255, 69, 58, 0.5)';
-                else if (ratio <= 0.75) bgColor = 'rgba(255, 69, 58, 0.75)';
-                else if (ratio > 0.75) bgColor = '#ff453a';
+                const bgColor = getHeatmapColor(amount, yearHeatmapData.maxSpend);
 
                 const isSelected = activeYearHeatmapMonth === monthIndex;
                 const isCurrentMonth = new Date().getFullYear() === yearHeatmapData.year && new Date().getMonth() === monthIndex;
@@ -3474,15 +2595,7 @@ ${descriptionsToCategorize.join('\n')}`;
               })}
             </div>
 
-            <div className="heatmap-card-legend" style={{ justifyContent: 'center', marginTop: '24px', marginBottom: '8px' }}>
-              <span>{t(locale, 'heatmapLow')}</span>
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#2c2c2e' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.25)' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.5)' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: 'rgba(255, 69, 58, 0.75)' }} />
-              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: '#ff453a' }} />
-              <span>{t(locale, 'heatmapHigh')}</span>
-            </div>
+            <HeatmapLegend locale={locale} className="heatmap-card-legend" />
 
             <div style={{ marginTop: '16px', padding: '14px', background: '#111214', borderRadius: '14px', border: '1px solid #2c2c2e', height: '240px', display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>

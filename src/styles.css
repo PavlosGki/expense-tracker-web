@@ -1359,12 +1359,23 @@ button {
 }
 
 .fab-button span {
-  display: inline-block;
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .fab-button.open span {
-  transform: rotate(45deg);
+  transform: none;
+}
+
+.fab-button-symbol {
+  width: 32px;
+  height: 32px;
+  display: block;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  transition: opacity 0.18s ease;
 }
 
 .filter-modal {

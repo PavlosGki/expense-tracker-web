@@ -12,5 +12,20 @@
       "type": "image/svg+xml",
       "purpose": "any"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Προσθήκη Εξόδου",
+      "short_name": "Νέο Έξοδο",
+      "description": "Άνοιγμα φόρμας για καταχώριση νέου εξόδου",
+      "url": "/?action=add-expense",
+      "icons": [
+        {
+          "src": "/apple-touch-icon.png",
+          "sizes": "180x180",
+          "type": "image/png"
+        }
+      ]
+    }
   ]
 }

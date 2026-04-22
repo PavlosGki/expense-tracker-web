@@ -46,7 +46,6 @@ export function clampFilterRange(fromDate: Date | null, toDate: Date | null) {
   if (fromDate) startIso = toLocalIsoDate(fromDate);
   if (toDate) endIso = toLocalIsoDate(toDate);
 
-  // Διασφάλιση σωστής σειράς αν οι ημερομηνίες είναι ανάποδα
   if (startIso > endIso) {
     [startIso, endIso] = [endIso, startIso];
   }
@@ -57,8 +56,6 @@ export function clampFilterRange(fromDate: Date | null, toDate: Date | null) {
 export function filterExpensesByDateRange(expenses: Expense[], fromDate: Date | null, toDate: Date | null) {
   const { startIso, endIso } = clampFilterRange(fromDate, toDate);
   
-  // Αν δεν υπάρχει φίλτρο "έως", επιτρέπουμε όλα τα μελλοντικά έξοδα 
-  // ορίζοντας μια πολύ μεγάλη ημερομηνία για το φιλτράρισμα
   const finalEndIso = toDate ? endIso : '2099-12-31';
 
   const startUtc = new Date(`${startIso}T00:00:00Z`);
@@ -105,7 +102,6 @@ export function getHistoryGroups(expenses: Expense[], range: Range, fromDate: Da
   const trackingStartUtc = new Date(`${TRACKING_START_ISO}T00:00:00Z`);
   
   const { startIso, endIso } = clampFilterRange(fromDate, toDate);
-  // Χρησιμοποιούμε τις ημερομηνίες από το clampFilterRange για το εύρος της λίστας
   const scopeStartUtc = new Date(`${startIso}T00:00:00Z`);
   const scopeEndExclusiveUtc = addDaysUtc(new Date(`${endIso}T00:00:00Z`), 1);
 

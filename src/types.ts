@@ -25,6 +25,16 @@ export type Expense = {
   receiptFileId?: string | null;
 };
 
+export type ExpenseDraft = {
+  project: string;
+  amount: string;
+  category: string;
+  emoji: string;
+  date: string;
+  comment: string;
+  receiptFileId: string | null;
+};
+
 export type HistoryGroup = {
   id: string;
   title: string;

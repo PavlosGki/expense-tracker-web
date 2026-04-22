@@ -30,7 +30,6 @@ export function useAnalyticsInsights(
       return t(locale, 'periodThisYear');
     };
 
-    // 1. Quiet Period
     if (periodExpenses.length === 0) {
       insights.push({
         icon: '✨',
@@ -41,7 +40,6 @@ export function useAnalyticsInsights(
 
     const periodTotalSpend = periodExpenses.reduce((sum, exp) => sum + (Number.parseFloat(exp.amount) || 0), 0);
 
-    // 2. Budget Pace Insights (priority)
     if (budgetPaceView.mode !== 'disabled' && budgetPaceView.mode !== 'day') {
       const delta = budgetPaceView.delta;
       if (delta > periodTotalSpend * 0.1 && delta > 10) {
@@ -64,7 +62,6 @@ export function useAnalyticsInsights(
       }
     }
 
-    // 3. Top Category in period
     if (periodExpenses.length > 1) {
       const categoryTotals: Record<string, number> = {};
       periodExpenses.forEach((exp) => {
@@ -87,7 +84,6 @@ export function useAnalyticsInsights(
       }
     }
 
-    // 4. Single Big Spender in period
     if (periodExpenses.length > 1) {
       const sortedExpenses = [...periodExpenses].sort((a, b) => Number(b.amount) - Number(a.amount));
       const biggestExpense = sortedExpenses[0];
@@ -103,7 +99,6 @@ export function useAnalyticsInsights(
       }
     }
     
-    // 5. Today is No-Spend day
     if (range === 'day' && periodTotalSpend === 0) {
         insights.push({
             icon: '🎉',
@@ -112,7 +107,6 @@ export function useAnalyticsInsights(
         });
     }
 
-    // 6. Top Project (all time)
     if (projects.length > 0) {
         const projectTotals: Record<string, number> = {};
         allExpenses.forEach(exp => {
@@ -131,7 +125,6 @@ export function useAnalyticsInsights(
         }
     }
 
-    // 7. Previous month savings
     if (income > 0) {
         const today = new Date();
         const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
@@ -148,7 +141,6 @@ export function useAnalyticsInsights(
         }
     }
 
-    // 8. Yearly pace
     if (range === 'year') {
         insights.push({
             icon: isYearOffTrack ? '📈' : '🎯',
@@ -157,14 +149,12 @@ export function useAnalyticsInsights(
         });
     }
 
-    // 9. Static tips
     insights.push({ icon: '💡', text: t(locale, 'tipReviewSubscriptions'), color: 'gray' });
     insights.push({ icon: '💡', text: t(locale, 'tipPlanGroceries'), color: 'gray' });
     insights.push({ icon: '💡', text: t(locale, 'tipSetGoals'), color: 'gray' });
     insights.push({ icon: '💡', text: t(locale, 'adviceExpert1'), color: 'gray' });
     insights.push({ icon: '💡', text: t(locale, 'adviceExpert2'), color: 'gray' });
     
-    // 10. Reward
     if (range === 'month' && budgetPaceView.mode === 'chart' && budgetPaceView.delta < 0) {
         insights.push({
             icon: '🏆',
@@ -173,7 +163,6 @@ export function useAnalyticsInsights(
         });
       }
 
-    // Fallback if no insights were generated
     if (insights.length === 0) {
       insights.push({
         icon: '💡',
@@ -182,7 +171,6 @@ export function useAnalyticsInsights(
       });
     }
 
-    // Remove duplicates
     const uniqueTexts = new Set<string>();
     return insights.filter((insight) => {
       if (uniqueTexts.has(insight.text)) return false;

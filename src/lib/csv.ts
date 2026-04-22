@@ -41,7 +41,6 @@ export function parseCsvRows(csvText: string) {
   let currentField = '';
   let inQuotes = false;
 
-  // Αυτόματος εντοπισμός διαχωριστικού (κόμμα ή ερωτηματικό)
   const firstLine = csvText.split('\n')[0] || '';
   const commaCount = (firstLine.match(/,/g) || []).length;
   const semiCount = (firstLine.match(/;/g) || []).length;

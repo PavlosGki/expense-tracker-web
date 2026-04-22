@@ -28,7 +28,6 @@ export function saveJson<T>(key: string, value: T) {
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
   } catch (error) {
-    console.warn(`Failed to save to localStorage for key "${key}":`, error);
   }
 }
 
