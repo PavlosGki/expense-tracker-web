@@ -150,6 +150,7 @@ export default function App() {
   const [importReviewModalOpen, setImportReviewModalOpen] = useState(false);
   const [importReviewExpenses, setImportReviewExpenses] = useState<Expense[]>([]);
   const [pendingCategoryExpenseId, setPendingCategoryExpenseId] = useState<string | null>(null);
+  const [markerTooltip, setMarkerTooltip] = useState<'month' | 'year' | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
@@ -182,6 +183,18 @@ export default function App() {
   const analyticsScrollLeftRef = useRef(0);
   const isClickPreventedRef = useRef(false);
   const donutListRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!markerTooltip) return;
+
+    const closeTooltip = () => setMarkerTooltip(null);
+
+    setTimeout(() => {
+      window.addEventListener('click', closeTooltip);
+    }, 0);
+
+    return () => window.removeEventListener('click', closeTooltip);
+  }, [markerTooltip]);
 
   useEffect(() => {
     if (!supabase) {
@@ -527,6 +540,16 @@ export default function App() {
     const expectedYearlyPct = (currentMonthNum / 12) * 100;
     return actualYearlyProgressPct > expectedYearlyPct;
   }, [actualYearlyProgressPct]);
+  const budgetDateMarkers = useMemo(() => {
+    const now = new Date();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const monthDatePct = Math.max(0, Math.min(100, 100 - (now.getDate() / daysInMonth) * 100));
+
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+    const yearEnd = new Date(now.getFullYear() + 1, 0, 1);
+    const yearDatePct = Math.max(0, Math.min(100, 100 - ((now.getTime() - yearStart.getTime()) / (yearEnd.getTime() - yearStart.getTime())) * 100));
+    return { monthDatePct, yearDatePct };
+  }, []);
 
   const donutPeriodExpenses = useMemo(() => {
     const todayIso = toLocalIsoDate(new Date());
@@ -1731,6 +1754,19 @@ ${descriptionsToCategorize.join('\n')}`;
                   <div className="progress-track budget-track">
                     <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - visualProgressPct)}%` }} />
                   </div>
+                  <span
+                    className="budget-date-marker"
+                    style={{ left: `${budgetDateMarkers.monthDatePct}%` }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMarkerTooltip(prev => prev === 'month' ? null : 'month');
+                    }}
+                  />
+                  {markerTooltip === 'month' && (
+                    <div className="marker-tooltip" style={{ left: `${budgetDateMarkers.monthDatePct}%` }}>
+                      {new Date().toLocaleDateString(locale === 'el' ? 'el-GR' : 'en-GB', { day: 'numeric', month: 'short' })}
+                    </div>
+                  )}
                   <strong className="budget-bar-value">{parsedIncome.toFixed(2)} €</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
@@ -1750,6 +1786,19 @@ ${descriptionsToCategorize.join('\n')}`;
                   <div className="progress-track budget-track">
                     <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - visualYearlyProgressPct)}%` }} />
                   </div>
+                  <span
+                    className="budget-date-marker"
+                    style={{ left: `${budgetDateMarkers.yearDatePct}%` }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMarkerTooltip(prev => prev === 'year' ? null : 'year');
+                    }}
+                  />
+                  {markerTooltip === 'year' && (
+                    <div className="marker-tooltip" style={{ left: `${budgetDateMarkers.yearDatePct}%` }}>
+                      {new Date().toLocaleDateString(locale === 'el' ? 'el-GR' : 'en-GB', { day: 'numeric', month: 'short' })}
+                    </div>
+                  )}
                   <strong className="budget-bar-value">{parsedYearly.toFixed(2)} €</strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>

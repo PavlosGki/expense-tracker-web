@@ -230,6 +230,48 @@ button {
   height: 22px;
 }
 
+.budget-date-marker {
+  position: absolute;
+  top: -4px;
+  width: 0;
+  height: 0;
+  margin-left: -6px;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid var(--accent);
+  z-index: 10;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+  cursor: pointer;
+}
+
+.marker-tooltip {
+  position: absolute;
+  top: -42px;
+  transform: translateX(-50%);
+  background: #1c1c1e;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  border: 1px solid #3a3a3c;
+  z-index: 20;
+  animation: fadeSlideUp 0.2s ease-out forwards;
+  pointer-events: none;
+}
+
+.marker-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1c1c1e;
+}
+
 .budget-fill {
   background: linear-gradient(90deg, #ff453a 0%, #ff9f0a 45%, #32d74b 100%);
 }
