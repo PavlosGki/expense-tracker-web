@@ -148,7 +148,7 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem('expense_custom_category_map') || '{}'); } catch { return {}; }
   });
   const [importReviewModalOpen, setImportReviewModalOpen] = useState(false);
-  const [fixMyMonthModalOpen, setFixMyMonthModalOpen] = useState(false);
+  const [fixMyPeriod, setFixMyPeriod] = useState<'month' | 'year' | null>(null);
   const [importReviewExpenses, setImportReviewExpenses] = useState<Expense[]>([]);
   const [pendingCategoryExpenseId, setPendingCategoryExpenseId] = useState<string | null>(null);
   const [markerTooltip, setMarkerTooltip] = useState<'month' | 'year' | null>(null);
@@ -590,7 +590,7 @@ export default function App() {
   }, [parsedIncome, currentMonthSpend]);
 
   const rescuePlan = useMemo(() => {
-    if (!fixMyMonthModalOpen) return null;
+    if (fixMyPeriod !== 'month') return null;
     const today = new Date();
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
     const currentDay = today.getDate();
@@ -644,7 +644,121 @@ export default function App() {
       topNonEssentials,
       forecastedSavings
     };
-  }, [fixMyMonthModalOpen, expenses, parsedIncome, currentMonthSpend]);
+  }, [fixMyPeriod, expenses, parsedIncome, currentMonthSpend]);
+
+  const yearlySmartInsight = useMemo(() => {
+    if (parsedYearly <= 0) return null;
+    const today = new Date();
+    const daysInYear = ((today.getFullYear() % 4 === 0 && today.getFullYear() % 100 > 0) || today.getFullYear() % 400 === 0) ? 366 : 365;
+    const yearStart = new Date(today.getFullYear(), 0, 1);
+    const currentDayOfYear = Math.floor((today.getTime() - yearStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const remainingDays = Math.max(1, daysInYear - currentDayOfYear);
+    const remainingBudget = parsedYearly - totals.year;
+    const safeDailySpend = remainingBudget / remainingDays;
+    const expectedDailySpend = parsedYearly / daysInYear;
+
+    if (remainingBudget < 0) {
+      return {
+        color: '#ff453a',
+        bg: 'rgba(255, 69, 58, 0.1)',
+        icon: '🚨',
+        badgeText: 'Εκτός Budget',
+        message: 'Έχεις ξεπεράσει το ετήσιο budget σου. Κάθε νέο έξοδο πλέον μειώνει τις αποταμιεύσεις σου.',
+        showFixMyMonth: true
+      };
+    }
+    
+    if (safeDailySpend < expectedDailySpend * 0.4) {
+      return {
+        color: '#ff9f0a',
+        bg: 'rgba(255, 159, 10, 0.1)',
+        icon: '⚠️',
+        badgeText: 'Κίνδυνος',
+        message: `Προσοχή: Σου απομένουν ${remainingBudget.toFixed(0)}€ για το έτος (${safeDailySpend.toFixed(0)}€/ημέρα). Περιόρισε τα έξοδα στα απολύτως απαραίτητα.`,
+        showFixMyMonth: true
+      };
+    }
+    
+    if (safeDailySpend < expectedDailySpend * 0.9) {
+      return {
+        color: '#ffd60a',
+        bg: 'rgba(255, 214, 10, 0.1)',
+        icon: '👀',
+        badgeText: 'Ελαφρώς εκτός',
+        message: `Έχεις ξεφύγει ελαφρώς. Προσπάθησε να μείνεις στα ${safeDailySpend.toFixed(0)}€/ημέρα για να βγεις ακριβώς στο τέλος του έτους.`,
+        showFixMyMonth: true
+      };
+    }
+    
+    return {
+      color: '#32d74b',
+      bg: 'rgba(50, 215, 75, 0.1)',
+      icon: '✨',
+      badgeText: 'Όλα τέλεια!',
+      message: `Εξαιρετική πορεία! Αν συνεχίσεις έτσι, στο τέλος του έτους θα σου περισσέψουν χρήματα.`,
+      showFixMyMonth: false
+    };
+  }, [parsedYearly, totals.year]);
+
+  const yearlyRescuePlan = useMemo(() => {
+    if (fixMyPeriod !== 'year') return null;
+    const today = new Date();
+    const daysInYear = ((today.getFullYear() % 4 === 0 && today.getFullYear() % 100 > 0) || today.getFullYear() % 400 === 0) ? 366 : 365;
+    const yearStart = new Date(today.getFullYear(), 0, 1);
+    const currentDayOfYear = Math.floor((today.getTime() - yearStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const remainingDays = Math.max(1, daysInYear - currentDayOfYear);
+    const remainingBudget = parsedYearly - totals.year;
+    const safeDailySpend = remainingBudget / remainingDays;
+    
+    const currentYearPrefix = String(today.getFullYear());
+    const thisYearExpenses = expenses.filter(e => e.date?.startsWith(currentYearPrefix));
+    
+    const nonEssentialCats = ['Καφές', 'Διασκέδαση', 'Ταξίδια', 'Ρούχα', 'Gaming', 'Ηλεκτρονικά', 'Ομορφιά', 'Δώρα', 'Taxi', 'Coffee', 'Entertainment', 'Travel', 'Clothes', 'Beauty', 'Gifts', 'Electronics'];
+    
+    const nonEssentialSpend: Record<string, { amount: number, emoji: string }> = {};
+    thisYearExpenses.forEach(e => {
+      const cat = e.category || 'Άλλο';
+      if (nonEssentialCats.includes(cat)) {
+        if (!nonEssentialSpend[cat]) nonEssentialSpend[cat] = { amount: 0, emoji: e.emoji || '🏷️' };
+        nonEssentialSpend[cat].amount += (parseFloat(e.amount) || 0);
+      }
+    });
+    
+    const topNonEssentials = Object.entries(nonEssentialSpend)
+      .sort((a, b) => b[1].amount - a[1].amount)
+      .slice(0, 3)
+      .filter(item => item[1].amount > 0);
+
+    // Forecast Algorithm for Year
+    const currentDailyPace = totals.year / Math.max(1, currentDayOfYear);
+    
+    const pastYearStart = new Date(today.getFullYear() - 1, 0, 1);
+    const pastYearEnd = new Date(today.getFullYear(), 0, 1);
+    const pastExpenses = expenses.filter(e => {
+      if (!e.date) return false;
+      const d = new Date(e.date);
+      return d >= pastYearStart && d < pastYearEnd;
+    });
+    const pastTotal = pastExpenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+    const pastDaysInYear = ((pastYearStart.getFullYear() % 4 === 0 && pastYearStart.getFullYear() % 100 > 0) || pastYearStart.getFullYear() % 400 === 0) ? 366 : 365;
+    const pastDailyAvg = pastTotal > 0 ? pastTotal / pastDaysInYear : 0;
+    
+    // Blend 70% current pace with 30% historical pace
+    const blendedDailyPace = pastTotal > 0 
+      ? (currentDailyPace * 0.7) + (pastDailyAvg * 0.3)
+      : currentDailyPace;
+      
+    const forecastedEndYearSpend = totals.year + (blendedDailyPace * remainingDays);
+    const forecastedSavings = Math.max(0, parsedYearly - forecastedEndYearSpend);
+        
+    return {
+      remainingBudget,
+      remainingDays,
+      safeDailySpend,
+      topNonEssentials,
+      forecastedSavings
+    };
+  }, [fixMyPeriod, expenses, parsedYearly, totals.year]);
 
   const isYearOffTrack = useMemo(() => {
     const currentMonthNum = new Date().getMonth() + 1;
@@ -1669,7 +1783,7 @@ ${descriptionsToCategorize.join('\n')}`;
 
   const showDashboard = tab !== 'settings';
   const isAnyModalOpen =
-    expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen || exportModalOpen || importModalOpen || bulkDeleteModalOpen || importReviewModalOpen || fixMyMonthModalOpen || analyticsModal !== null;
+    expenseModalOpen || filterModalOpen || backgroundModalOpen || projectModalOpen || categoryModalOpen || exportModalOpen || importModalOpen || bulkDeleteModalOpen || importReviewModalOpen || fixMyPeriod !== null || analyticsModal !== null;
 
   const handleGoogleSignIn = async () => {
     if (!supabase) return;
@@ -1893,7 +2007,7 @@ ${descriptionsToCategorize.join('\n')}`;
                   {parsedIncome > 0 && smartInsight && (
                     <span 
                       className="insight-badge"
-                      onClick={() => setFixMyMonthModalOpen(true)}
+                      onClick={() => setFixMyPeriod('month')}
                       style={{ 
                         fontSize: '11px', 
                         fontWeight: '700', 
@@ -1946,9 +2060,25 @@ ${descriptionsToCategorize.join('\n')}`;
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
                   <p className="budget-consumed" style={{ margin: 0, color: actualYearlyProgressPct > 100 ? '#ff453a' : '#8e8e93' }}>{actualYearlyProgressPct.toFixed(0)}% κατανάλωση</p>
-                  {parsedYearly > 0 && (
-                    <span style={{ fontSize: '11px', fontWeight: '700', padding: '4px 8px', borderRadius: '6px', background: isYearOverBudget ? 'rgba(255,69,58,0.2)' : isYearOffTrack ? 'rgba(255,159,10,0.2)' : 'rgba(50,215,75,0.2)', color: isYearOverBudget ? '#ff453a' : isYearOffTrack ? '#ff9f0a' : '#32d74b' }}>
-                      {isYearOverBudget ? `⚠️ ${t(locale, 'analyticsOverBy')}: ${yearOverage.toFixed(0)}€` : isYearOffTrack ? t(locale, 'badgeYearOffTrack') : t(locale, 'badgeYearOnTrack')}
+                  {parsedYearly > 0 && yearlySmartInsight && (
+                    <span 
+                      className="insight-badge"
+                      onClick={() => setFixMyPeriod('year')}
+                      style={{ 
+                        fontSize: '11px', 
+                        fontWeight: '700', 
+                        padding: '4px 8px', 
+                        borderRadius: '6px', 
+                        background: yearlySmartInsight.bg, 
+                        color: yearlySmartInsight.color,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      {yearlySmartInsight.icon} {yearlySmartInsight.badgeText}
+                      <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7, marginLeft: '2px' }}><polyline points="9 18 15 12 9 6"></polyline></svg>
                     </span>
                   )}
                 </div>
@@ -3479,75 +3609,83 @@ ${descriptionsToCategorize.join('\n')}`;
           </form>
         </div>
       )}
-      {fixMyMonthModalOpen && rescuePlan && smartInsight && (
-        <div className="modal-backdrop" onClick={() => setFixMyMonthModalOpen(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <h3 style={{ margin: 0, fontSize: '1.2rem', color: smartInsight.color }}>{smartInsight.showFixMyMonth ? 'Σχέδιο Διάσωσης Μήνα 🛟' : 'Συμβουλή του Μήνα 💡'}</h3>
-            
-            <div style={{ background: smartInsight.bg, border: `1px solid ${smartInsight.color}40`, padding: '16px', borderRadius: '12px', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-              <span style={{ fontSize: '1.4rem', lineHeight: '1' }}>{smartInsight.icon}</span>
-              <p style={{ margin: 0, fontSize: '0.9rem', color: '#f5f5f7', lineHeight: '1.4', flex: 1 }}>
-                {smartInsight.message}
-              </p>
-            </div>
-
-            {smartInsight.showFixMyMonth && (
-              <div style={{ background: '#1c1c1e', padding: '16px', borderRadius: '12px' }}>
-                <p style={{ margin: '0 0 8px 0', fontSize: '0.95rem', color: '#f5f5f7' }}>
-                  Μέχρι το τέλος του μήνα μένουν <strong>{rescuePlan.remainingDays} ημέρες</strong>.
-                </p>
-                <p style={{ margin: 0, fontSize: '0.95rem', color: '#f5f5f7' }}>
-                  Για να μην βγεις εκτός στόχου, πρέπει να ξοδεύεις αυστηρά μέχρι <strong>{rescuePlan.safeDailySpend.toFixed(2)}€ την ημέρα</strong>.
+      {(() => {
+        const periodInsight = fixMyPeriod === 'year' ? yearlySmartInsight : smartInsight;
+        const periodRescuePlan = fixMyPeriod === 'year' ? yearlyRescuePlan : rescuePlan;
+        if (!fixMyPeriod || !periodRescuePlan || !periodInsight) return null;
+        
+        return (
+          <div className="modal-backdrop" onClick={() => setFixMyPeriod(null)}>
+            <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', color: periodInsight.color }}>
+                {periodInsight.showFixMyMonth ? (fixMyPeriod === 'year' ? 'Σχέδιο Διάσωσης Έτους 🛟' : 'Σχέδιο Διάσωσης Μήνα 🛟') : 'Συμβουλή 💡'}
+              </h3>
+              
+              <div style={{ background: periodInsight.bg, border: `1px solid ${periodInsight.color}40`, padding: '16px', borderRadius: '12px', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '1.4rem', lineHeight: '1' }}>{periodInsight.icon}</span>
+                <p style={{ margin: 0, fontSize: '0.9rem', color: '#f5f5f7', lineHeight: '1.4', flex: 1 }}>
+                  {periodInsight.message}
                 </p>
               </div>
-            )}
 
-            {smartInsight.showFixMyMonth && rescuePlan.topNonEssentials.length > 0 && (
-              <div style={{ background: '#1c1c1e', padding: '16px', borderRadius: '12px' }}>
-                <p style={{ margin: '0 0 12px 0', fontSize: '0.95rem', color: '#f5f5f7', fontWeight: 600 }}>
-                  Από πού να κόψεις:
-                </p>
-                <p style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', lineHeight: '1.4' }}>
-                  Αυτές είναι οι κατηγορίες που σου "τρώνε" τα περισσότερα χρήματα αυτό τον μήνα (χωρίς να είναι απολύτως απαραίτητες). Προσπάθησε να τις μειώσεις:
-                </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {rescuePlan.topNonEssentials.map(([cat, info]) => (
-                    <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#2c2c2e', padding: '10px 14px', borderRadius: '8px' }}>
-                      <span style={{ fontSize: '0.95rem', color: '#f5f5f7' }}>{info.emoji} {getLocalizedCategoryName(locale, cat)}</span>
-                      <strong style={{ color: '#ff453a', fontSize: '1rem' }}>{info.amount.toFixed(2)}€</strong>
-                    </div>
-                  ))}
+              {periodInsight.showFixMyMonth && (
+                <div style={{ background: '#1c1c1e', padding: '16px', borderRadius: '12px' }}>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '0.95rem', color: '#f5f5f7' }}>
+                    Μέχρι το τέλος του {fixMyPeriod === 'year' ? 'έτους' : 'μήνα'} μένουν <strong>{periodRescuePlan.remainingDays} ημέρες</strong>.
+                  </p>
+                  <p style={{ margin: 0, fontSize: '0.95rem', color: '#f5f5f7' }}>
+                    Για να μην βγεις εκτός στόχου, πρέπει να ξοδεύεις αυστηρά μέχρι <strong>{periodRescuePlan.safeDailySpend.toFixed(2)}€ την ημέρα</strong>.
+                  </p>
                 </div>
-              </div>
-            )}
+              )}
 
-            {!smartInsight.showFixMyMonth && rescuePlan.forecastedSavings > 0 && (
-              <div style={{ background: 'rgba(50, 215, 75, 0.1)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(50, 215, 75, 0.3)', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center', textAlign: 'center' }}>
-                <span style={{ fontSize: '2rem' }}>🎯</span>
-                <p style={{ margin: 0, fontSize: '0.95rem', color: '#f5f5f7' }}>
-                  Με βάση τον ρυθμό σου και το ιστορικό σου, προβλέπεται να αποταμιεύσεις:
-                </p>
-                <strong style={{ fontSize: '2rem', color: '#32d74b' }}>{rescuePlan.forecastedSavings.toFixed(2)}€</strong>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: '#8e8e93' }}>
-                  Συνέχισε με την ίδια συνέπεια!
-                </p>
-              </div>
-            )}
+              {periodInsight.showFixMyMonth && periodRescuePlan.topNonEssentials.length > 0 && (
+                <div style={{ background: '#1c1c1e', padding: '16px', borderRadius: '12px' }}>
+                  <p style={{ margin: '0 0 12px 0', fontSize: '0.95rem', color: '#f5f5f7', fontWeight: 600 }}>
+                    Από πού να κόψεις:
+                  </p>
+                  <p style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#8e8e93', lineHeight: '1.4' }}>
+                    Αυτές είναι οι κατηγορίες που σου "τρώνε" τα περισσότερα χρήματα αυτό το {fixMyPeriod === 'year' ? 'έτος' : 'μήνα'} (χωρίς να είναι απολύτως απαραίτητες). Προσπάθησε να τις μειώσεις:
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {periodRescuePlan.topNonEssentials.map(([cat, info]) => (
+                      <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#2c2c2e', padding: '10px 14px', borderRadius: '8px' }}>
+                        <span style={{ fontSize: '0.95rem', color: '#f5f5f7' }}>{info.emoji} {getLocalizedCategoryName(locale, cat)}</span>
+                        <strong style={{ color: '#ff453a', fontSize: '1rem' }}>{info.amount.toFixed(2)}€</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-            {smartInsight.showFixMyMonth && (
-              <div style={{ textAlign: 'center', marginTop: '8px' }}>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: '#8e8e93', lineHeight: '1.5' }}>
-                  Μπορείς να το καταφέρεις! 💪<br/>Κατάγραψε κάθε έξοδο και σκέψου διπλά πριν από κάθε αγορά.
-                </p>
-              </div>
-            )}
+              {!periodInsight.showFixMyMonth && periodRescuePlan.forecastedSavings > 0 && (
+                <div style={{ background: 'rgba(50, 215, 75, 0.1)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(50, 215, 75, 0.3)', display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center', textAlign: 'center' }}>
+                  <span style={{ fontSize: '2rem' }}>🎯</span>
+                  <p style={{ margin: 0, fontSize: '0.95rem', color: '#f5f5f7' }}>
+                    Με βάση τον ρυθμό σου και το ιστορικό σου, προβλέπεται να αποταμιεύσεις:
+                  </p>
+                  <strong style={{ fontSize: '2rem', color: '#32d74b' }}>{periodRescuePlan.forecastedSavings.toFixed(2)}€</strong>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#8e8e93' }}>
+                    Συνέχισε με την ίδια συνέπεια!
+                  </p>
+                </div>
+              )}
 
-            <button className="primary-btn" onClick={() => setFixMyMonthModalOpen(false)} style={{ marginTop: '8px' }}>
-              {smartInsight.showFixMyMonth ? 'Το κατάλαβα, φύγαμε!' : 'Κλείσιμο'}
-            </button>
+              {periodInsight.showFixMyMonth && (
+                <div style={{ textAlign: 'center', marginTop: '8px' }}>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: '#8e8e93', lineHeight: '1.5' }}>
+                    Μπορείς να το καταφέρεις! 💪<br/>Κατάγραψε κάθε έξοδο και σκέψου διπλά πριν από κάθε αγορά.
+                  </p>
+                </div>
+              )}
+
+              <button className="primary-btn" onClick={() => setFixMyPeriod(null)} style={{ marginTop: '8px' }}>
+                {periodInsight.showFixMyMonth ? 'Το κατάλαβα, φύγαμε!' : 'Κλείσιμο'}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
