@@ -43,6 +43,7 @@ import {
   ALL_CATEGORIES_VALUE,
   ALL_PROJECTS_VALUE,
   DEFAULT_CATEGORIES,
+  NEEDS_CATEGORIES,
   donutArcPath,
   extractFirstEmoji,
   getBackgroundCss,
@@ -134,6 +135,8 @@ export default function App() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState('');
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [homeBudgetEditModal, setHomeBudgetEditModal] = useState<'monthly' | 'yearly' | null>(null);
+  const [homeBudgetEditValue, setHomeBudgetEditValue] = useState('');
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportFromDate, setExportFromDate] = useState('');
   const [exportToDate, setExportToDate] = useState('');
@@ -515,6 +518,25 @@ export default function App() {
     () => getAnalyticsGroups(metaFilteredExpenses, range, listBounds.from, listBounds.to, locale).filter(g => g.items.length > 0),
     [metaFilteredExpenses, range, listBounds, locale]
   );
+  
+  const { needsMonthTotal, wantsMonthTotal } = useMemo(() => {
+    const todayIso = new Date().toISOString().slice(0, 7);
+    let needs = 0;
+    let wants = 0;
+    filteredExpenses.forEach(exp => {
+      if (exp.date.slice(0, 7) === todayIso) {
+        const amount = Number.parseFloat(exp.amount) || 0;
+        if (NEEDS_CATEGORIES.includes(exp.category)) {
+          needs += amount;
+        } else {
+          // Anything not explicitly a Need is considered a Want
+          wants += amount;
+        }
+      }
+    });
+    return { needsMonthTotal: needs, wantsMonthTotal: wants };
+  }, [filteredExpenses]);
+
   const parsedIncome = Number(income) || 0;
   const parsedYearly = Number(yearlyBudget) || 0;
   const currentMonthSpend = totals.month;
@@ -1822,6 +1844,36 @@ ${descriptionsToCategorize.join('\n')}`;
     }
   };
 
+  const handleHomeBudgetSave = async () => {
+    let finalIncome = income;
+    let finalYearly = yearlyBudget;
+    
+    if (homeBudgetEditModal === 'monthly') {
+      finalIncome = Number(homeBudgetEditValue) || 0;
+      setBudgetInputValue(String(finalIncome));
+      setIncome(finalIncome);
+    } else if (homeBudgetEditModal === 'yearly') {
+      finalYearly = Number(homeBudgetEditValue) || 0;
+      setYearlyBudgetInputValue(String(finalYearly));
+      setYearlyBudget(finalYearly);
+    }
+    
+    hasLocalBudgetOverrideRef.current = true;
+    pendingBudgetRef.current = { income: finalIncome, yearly: finalYearly };
+
+    if (user?.id && supabase) {
+      await supabase.from('profiles').upsert({
+        id: user.id,
+        income: finalIncome,
+        yearly_budget: finalYearly,
+        locale,
+        background,
+        updated_at: new Date().toISOString()
+      });
+    }
+    setHomeBudgetEditModal(null);
+  };
+
   const handleDeleteReceipt = async () => {
     if (!window.confirm('Είστε σίγουροι ότι θέλετε να διαγράψετε τη φωτογραφία; Θα διαγραφεί οριστικά και από το Google Drive.')) return;
     
@@ -1973,7 +2025,13 @@ ${descriptionsToCategorize.join('\n')}`;
               }}
             >
               <section className="panel budget-panel">
-                <h3 className="budget-title">{t(locale, 'monthlyBudget')}</h3>
+                <h3 
+                  className="budget-title" 
+                  style={{ cursor: 'pointer', display: 'inline-block' }}
+                  onClick={(e) => { e.stopPropagation(); setHomeBudgetEditValue(budgetInputValue); setHomeBudgetEditModal('monthly'); }}
+                >
+                  {t(locale, 'monthlyBudget')}
+                </h3>
                 <div className="budget-bar-wrap">
                   {currentMonthSpend > 0 && (
                     <strong className="budget-spent-value">{(parsedIncome - currentMonthSpend).toFixed(2)} €</strong>
@@ -2000,7 +2058,13 @@ ${descriptionsToCategorize.join('\n')}`;
                       {new Date().toLocaleDateString(locale === 'el' ? 'el-GR' : 'en-GB', { day: 'numeric', month: 'short' })}
                     </div>
                   )}
-                  <strong className="budget-bar-value">{parsedIncome.toFixed(2)} €</strong>
+                  <strong 
+                    className="budget-bar-value" 
+                    onClick={(e) => { e.stopPropagation(); setHomeBudgetEditValue(budgetInputValue); setHomeBudgetEditModal('monthly'); }} 
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {parsedIncome.toFixed(2)} €
+                  </strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
                   <p className="budget-consumed" style={{ margin: 0, color: actualProgressPct > 100 ? '#ff453a' : '#8e8e93' }}>{actualProgressPct.toFixed(0)}% κατανάλωση</p>
@@ -2028,8 +2092,14 @@ ${descriptionsToCategorize.join('\n')}`;
                 </div>
               </section>
 
-              <section className="panel budget-panel yearly">
-                <h3 className="budget-title">{t(locale, 'yearlyBudget')}</h3>
+              <section className="panel budget-panel">
+                <h3 
+                  className="budget-title" 
+                  style={{ cursor: 'pointer', display: 'inline-block' }}
+                  onClick={(e) => { e.stopPropagation(); setHomeBudgetEditValue(yearlyBudgetInputValue); setHomeBudgetEditModal('yearly'); }}
+                >
+                  {t(locale, 'yearlyBudget')}
+                </h3>
                 <div className="budget-bar-wrap">
                   {totals.year > 0 && (
                     <strong className="budget-spent-value">{(parsedYearly - totals.year).toFixed(2)} €</strong>
@@ -2056,7 +2126,13 @@ ${descriptionsToCategorize.join('\n')}`;
                       {new Date().toLocaleDateString(locale === 'el' ? 'el-GR' : 'en-GB', { day: 'numeric', month: 'short' })}
                     </div>
                   )}
-                  <strong className="budget-bar-value">{parsedYearly.toFixed(2)} €</strong>
+                  <strong 
+                    className="budget-bar-value" 
+                    onClick={(e) => { e.stopPropagation(); setHomeBudgetEditValue(yearlyBudgetInputValue); setHomeBudgetEditModal('yearly'); }} 
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {parsedYearly.toFixed(2)} €
+                  </strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
                   <p className="budget-consumed" style={{ margin: 0, color: actualYearlyProgressPct > 100 ? '#ff453a' : '#8e8e93' }}>{actualYearlyProgressPct.toFixed(0)}% κατανάλωση</p>
@@ -2170,6 +2246,9 @@ ${descriptionsToCategorize.join('\n')}`;
             handleExpenseTouchStart={handleExpenseTouchStart}
             handleExpenseTouchEnd={handleExpenseTouchEnd}
             openEditExpense={openEditExpense}
+            needsMonthTotal={needsMonthTotal}
+            wantsMonthTotal={wantsMonthTotal}
+            income={parsedIncome}
           />
         )}
         {tab === 'analytics' && (
@@ -3686,6 +3765,41 @@ ${descriptionsToCategorize.join('\n')}`;
           </div>
         );
       })()}
+      {homeBudgetEditModal && (
+        <div className="modal-backdrop" onClick={() => setHomeBudgetEditModal(null)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: '360px', padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '20px' }}>
+                {homeBudgetEditModal === 'monthly' ? t(locale, 'monthlyBudget') : t(locale, 'yearlyBudget')}
+              </h3>
+              <button className="ghost-btn" style={{ padding: '8px 12px' }} onClick={() => setHomeBudgetEditModal(null)}>
+                {t(locale, 'close')}
+              </button>
+            </div>
+            <div className="input-group" style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', color: '#8e8e93', fontSize: '14px', fontWeight: 'bold' }}>
+                {t(locale, 'budgetAmount') || 'Ποσό Budget'}
+              </label>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center', background: '#1c1c1e', padding: '12px 16px', borderRadius: '12px', border: '1px solid #2c2c2e' }}>
+                <input
+                  type="number"
+                  style={{ flex: 1, background: 'transparent', border: 'none', color: '#fff', fontSize: '24px', fontWeight: 'bold', outline: 'none', width: '100%' }}
+                  value={homeBudgetEditValue}
+                  onChange={e => setHomeBudgetEditValue(e.target.value)}
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleHomeBudgetSave();
+                  }}
+                />
+                <span style={{ fontSize: '24px', color: '#8e8e93', fontWeight: 'bold' }}>€</span>
+              </div>
+            </div>
+            <button className="primary-btn" style={{ width: '100%', padding: '16px', fontSize: '16px', fontWeight: 'bold', borderRadius: '12px' }} onClick={handleHomeBudgetSave}>
+              {t(locale, 'save')}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

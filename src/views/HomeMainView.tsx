@@ -1,7 +1,7 @@
 import { formatIsoDate } from '../lib/date';
 import { getLocalizedCategoryName, t } from '../lib/i18n';
 import type { Expense, HistoryGroup, Locale, Range } from '../types';
-import { useState, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useState, useRef, useEffect, type Dispatch, type SetStateAction } from 'react';
 
 type HomeMainViewProps = {
   locale: Locale;
@@ -49,6 +49,12 @@ export function HomeMainView({
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
   const scrollLeftRef = useRef(0);
+  const [animated, setAnimated] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setAnimated(true), 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   const targetNeeds = income * 0.5;
   const targetWants = income * 0.3;
@@ -80,24 +86,27 @@ export function HomeMainView({
 
   // Gauge Render Helper
   const renderGauge = (label: string, targetPctOfIncome: number, currentAmount: number, color: string, icon: string, isSavings: boolean = false) => {
-    const currentPctOfIncome = income > 0 ? (currentAmount / income) * 100 : 0;
+    const displayAmount = animated ? currentAmount : 0;
+    const currentPctOfIncome = income > 0 ? (displayAmount / income) * 100 : 0;
     const clampedPct = Math.min(100, currentPctOfIncome);
-
+    
     const cx = 50, cy = 50, r = 35;
     const L = Math.PI * r;
-    const dashOffset = L - (targetPctOfIncome / 100) * L;
+    const dashOffset = L - ((animated ? targetPctOfIncome : 0) / 100) * L;
+    
+    // Needle rotation: 0% is -90deg, 100% is +90deg
+    const needleRotation = (clampedPct / 100) * 180 - 90;
+    
+    // Draw needle pointing straight UP (which is 0deg rotation, middle of gauge)
+    const tipX = cx;
+    const tipY = cy - 40;
+    
+    const base1X = cx - 2.5;
+    const base1Y = cy;
+    const base2X = cx + 2.5;
+    const base2Y = cy;
 
-    const angleRad = Math.PI - (clampedPct / 100) * Math.PI;
-    const tipX = cx + 40 * Math.cos(angleRad);
-    const tipY = cy - 40 * Math.sin(angleRad);
-
-    // Needle base
-    const base1X = cx + 2.5 * Math.cos(angleRad - Math.PI / 2);
-    const base1Y = cy - 2.5 * Math.sin(angleRad - Math.PI / 2);
-    const base2X = cx + 2.5 * Math.cos(angleRad + Math.PI / 2);
-    const base2Y = cy - 2.5 * Math.sin(angleRad + Math.PI / 2);
-
-    const isOver = isSavings ? currentAmount < (income * (targetPctOfIncome / 100)) : currentAmount > (income * (targetPctOfIncome / 100));
+    const isOver = isSavings ? currentAmount < (income * (targetPctOfIncome/100)) : currentAmount > (income * (targetPctOfIncome/100));
     const needleColor = isOver ? (isSavings ? '#ff9f0a' : '#ff453a') : '#f5f5f7';
 
     return (
@@ -105,25 +114,34 @@ export function HomeMainView({
         <svg width="100%" viewBox="0 0 100 70" style={{ overflow: 'visible' }}>
           {/* Background track (Total Income) */}
           <path d={`M 15 50 A 35 35 0 0 1 85 50`} fill="none" stroke="#2c2c2e" strokeWidth="10" strokeLinecap="round" />
-
+          
           {/* Colored target area */}
-          <path
-            d={`M 15 50 A 35 35 0 0 1 85 50`}
-            fill="none"
-            stroke={color}
-            strokeWidth="10"
-            strokeLinecap="round"
-            strokeDasharray={L}
-            strokeDashoffset={dashOffset}
+          <path 
+            d={`M 15 50 A 35 35 0 0 1 85 50`} 
+            fill="none" 
+            stroke={color} 
+            strokeWidth="10" 
+            strokeLinecap="round" 
+            strokeDasharray={`${L}`} 
+            strokeDashoffset={`${dashOffset}`} 
+            style={{ transition: 'stroke-dashoffset 1s ease-out' }}
           />
-
+          
           {/* Needle */}
-          <polygon points={`${base1X},${base1Y} ${base2X},${base2Y} ${tipX},${tipY}`} fill={needleColor} style={{ transition: 'all 0.5s ease' }} />
-          <circle cx={cx} cy={cy} r="3" fill={needleColor} style={{ transition: 'fill 0.5s ease' }} />
-
+          <g 
+            style={{ 
+              transform: `rotate(${needleRotation}deg)`, 
+              transformOrigin: `${cx}px ${cy}px`, 
+              transition: 'transform 1.2s cubic-bezier(0.34, 1.56, 0.64, 1)' 
+            }}
+          >
+            <polygon points={`${base1X},${base1Y} ${base2X},${base2Y} ${tipX},${tipY}`} fill={needleColor} style={{ transition: 'fill 1s ease-out' }} />
+          </g>
+          <circle cx={cx} cy={cy} r="3.5" fill={needleColor} style={{ transition: 'fill 1s ease-out' }} />
+          
           {/* Current Amount */}
           <text x="50" y="68" fill={isOver ? needleColor : '#f5f5f7'} fontSize="12" textAnchor="middle" fontWeight="700">
-            {currentAmount.toFixed(0)}€
+            {displayAmount.toFixed(0)}€
           </text>
         </svg>
         <span style={{ fontSize: '10px', color: '#8e8e93', marginTop: '2px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
