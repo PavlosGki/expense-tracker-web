@@ -36,6 +36,7 @@ export function SettingsView(props: any) {
     handleSignOut,
     importInputRef,
     handleImportCsv,
+    displayCategories,
   } = props;
 
   return (

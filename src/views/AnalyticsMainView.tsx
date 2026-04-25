@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { formatIsoDate } from '../lib/date';
 import { getLocalizedCategoryName, getLocalizedMonthAcc, t } from '../lib/i18n';
 import { YEAR_HEATMAP_MONTH_LABELS_EL, YEAR_HEATMAP_MONTH_LABELS_EN } from '../config/heatmapConstants';
@@ -12,8 +13,16 @@ export function AnalyticsMainView(props: any) {
     prevTotal, prevBarPct, currentTotal, currentBarPct, categoryDonut, monthHeatmapData, setSeamlessHeatmapTransition, setHeatmapSlideDir,
     setHeatmapViewDate, setActiveHeatmapDay, weekHeatmapData, setWeekHeatmapSlideDir, setWeekHeatmapViewStartDate, setActiveWeekHeatmapDayIndex,
     yearHeatmapData, setYearHeatmapSlideDir, setActiveYearHeatmapMonth, hasActiveFilter, fromDate, toDate, categoryFilterLabel, projectFilterLabel,
-    analyticsGroups, analyticsCategoryUniverse, expandedGroups, setExpandedGroups
+    analyticsGroups, analyticsCategoryUniverse, expandedGroups, setExpandedGroups, openEditExpense
   } = props;
+
+  const [categoryDetailsModal, setCategoryDetailsModal] = useState<{
+    groupTitle: string;
+    categoryName: string;
+    categoryEmoji: string;
+    expenses: any[];
+    totalAmount: number;
+  } | null>(null);
 
   return (
           <>
@@ -462,6 +471,7 @@ export function AnalyticsMainView(props: any) {
                   .map((category: any) => {
                     const entry = aggregate[category.name];
                     return {
+                      originalName: category.name,
                       name: getLocalizedCategoryName(locale, category.name),
                       amount: entry?.amount ?? 0,
                       emoji: entry?.emoji ?? category.emoji ?? '🏷️',
@@ -487,7 +497,21 @@ export function AnalyticsMainView(props: any) {
                             const fillPct = maxAmount > 0 ? (row.amount / maxAmount) * 100 : 0;
                             const isTightBar = fillPct <= 20;
                             return (
-                              <div key={`${group.id}_${row.name}`} className="bar-row">
+                              <div 
+                                key={`${group.id}_${row.name}`} 
+                                className="bar-row"
+                                style={{ cursor: 'pointer' }}
+                                onClick={() => {
+                                  const catExpenses = group.items.filter((e: any) => (e.category || t(locale, 'other')) === row.originalName);
+                                  setCategoryDetailsModal({
+                                    groupTitle: group.title,
+                                    categoryName: row.name,
+                                    categoryEmoji: row.emoji,
+                                    expenses: catExpenses,
+                                    totalAmount: row.amount
+                                  });
+                                }}
+                              >
                                 <div className="bar-label">
                                   <span>{row.emoji}</span>
                                   <strong>{row.name}</strong>
@@ -527,6 +551,58 @@ export function AnalyticsMainView(props: any) {
                 );
               })}
             </section>
+
+            {categoryDetailsModal && (
+              <div className="modal-backdrop" onClick={() => setCategoryDetailsModal(null)} style={{ zIndex: 1000 }}>
+                <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <span style={{ fontSize: '32px' }}>{categoryDetailsModal.categoryEmoji}</span>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: '18px', color: '#fff' }}>{categoryDetailsModal.categoryName}</h3>
+                        <div style={{ color: '#8e8e93', fontSize: '13px', marginTop: '2px' }}>{categoryDetailsModal.groupTitle}</div>
+                      </div>
+                    </div>
+                    <button className="ghost-btn" style={{ padding: '8px' }} onClick={() => setCategoryDetailsModal(null)}>
+                      {t(locale, 'close')}
+                    </button>
+                  </div>
+                  
+                  <div style={{ padding: '16px', background: '#111214', borderRadius: '12px', border: '1px solid #2c2c2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <span style={{ color: '#8e8e93', fontSize: '14px', fontWeight: '500' }}>{t(locale, 'analyticsTotal')}</span>
+                    <strong style={{ fontSize: '20px', color: '#fff' }}>{categoryDetailsModal.totalAmount.toFixed(2)}€</strong>
+                  </div>
+
+                  <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+                    {categoryDetailsModal.expenses.map((exp: any) => (
+                      <div 
+                        key={exp.id} 
+                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', cursor: openEditExpense ? 'pointer' : 'default' }}
+                        onClick={() => {
+                          if (openEditExpense) {
+                            setCategoryDetailsModal(null);
+                            openEditExpense(exp);
+                          }
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <span style={{ fontSize: '20px' }}>{exp.emoji}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{ fontSize: '15px', fontWeight: '500', color: '#fff' }}>
+                              {exp.comment || getLocalizedCategoryName(locale, exp.category)}
+                            </span>
+                            <span style={{ fontSize: '12px', color: '#8e8e93' }}>
+                              {formatIsoDate(exp.date)} {exp.project ? ` • ${exp.project}` : ''}
+                            </span>
+                          </div>
+                        </div>
+                        <strong style={{ fontSize: '15px', color: '#fff' }}>{Number.parseFloat(exp.amount).toFixed(2)}€</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </>
   );
 }

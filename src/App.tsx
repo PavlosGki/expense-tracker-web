@@ -62,7 +62,6 @@ import {
 } from './config/heatmapConstants';
 import { useHorizontalSwipe } from './hooks/useHorizontalSwipe';
 import { useBudgetPace } from './hooks/useBudgetPace';
-import { useAnalyticsInsights } from './hooks/useAnalyticsInsight';
 import { getHeatmapColor } from './lib/heatmap';
 import './styles.css';
 import type { Category, Expense, ExpenseDraft, Locale, Project, Range, TabId } from './types';
@@ -183,14 +182,20 @@ export default function App() {
   const analyticsCarouselRef = useRef<HTMLDivElement | null>(null);
   const [activeAnalyticsSlide, setActiveAnalyticsSlide] = useState(0);
   const isAnalyticsDraggingRef = useRef(false);
-  const [activeInsightIndex, setActiveInsightIndex] = useState(0);
   const analyticsStartXRef = useRef(0);
   const analyticsScrollLeftRef = useRef(0);
   const isClickPreventedRef = useRef(false);
   const donutListRef = useRef<HTMLDivElement | null>(null);
-  const [activeGaugeTooltip, setActiveGaugeTooltip] = useState<string | null>(null);
   const [showRuleTooltip, setShowRuleTooltip] = useState(false);
   const [animateGauges, setAnimateGauges] = useState(false);
+  const [ruleDetailsModal, setRuleDetailsModal] = useState<{
+    labelKey: string;
+    icon: string;
+    color: string;
+    amount: number;
+    target: number;
+    expenses: Expense[];
+  } | null>(null);
 
   useEffect(() => {
     if (!markerTooltip) return;
@@ -203,15 +208,6 @@ export default function App() {
 
     return () => window.removeEventListener('click', closeTooltip);
   }, [markerTooltip]);
-
-  useEffect(() => {
-    if (!activeGaugeTooltip) return;
-    const closeTooltip = () => setActiveGaugeTooltip(null);
-    setTimeout(() => {
-      window.addEventListener('click', closeTooltip);
-    }, 0);
-    return () => window.removeEventListener('click', closeTooltip);
-  }, [activeGaugeTooltip]);
 
   useEffect(() => {
     if (!showRuleTooltip) return;
@@ -867,28 +863,6 @@ export default function App() {
   const budgetPaceTarget = budgetPaceView.target;
   const budgetPaceActual = budgetPaceView.actual;
   const budgetPaceDelta = budgetPaceView.delta;
-  const allInsights = useAnalyticsInsights(
-    expenses,
-    donutPeriodExpenses,
-    budgetPaceView,
-    range,
-    locale,
-    projects,
-    parsedIncome,
-    isYearOffTrack
-  );
-  const displayInsight = allInsights[activeInsightIndex] ?? {
-    icon: '💡',
-    text: t(locale, 'tip1'),
-    color: 'gray',
-  };
-  const insightColors: Record<string, string> = {
-    blue: 'linear-gradient(135deg, #0a84ff 0%, #0074e8 100%)',
-    green: 'linear-gradient(135deg, #32d74b 0%, #30c157 100%)',
-    orange: 'linear-gradient(135deg, #ff9f0a 0%, #ff453a 100%)',
-    yellow: 'linear-gradient(135deg, #ffd60a 0%, #ffc700 100%)',
-    gray: 'rgba(255, 255, 255, 0.08)',
-  };
   const budgetPaceDayMax = Math.max(budgetPaceActual, budgetPaceTarget, 1);
 
   const budgetPaceDayActualPct = (budgetPaceActual / budgetPaceDayMax) * 100;
@@ -1962,7 +1936,21 @@ ${descriptionsToCategorize.join('\n')}`;
     return (
       <div 
         style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, padding: '0 2px', maxWidth: '110px', cursor: 'pointer' }}
-        onClick={(e) => { e.stopPropagation(); setActiveGaugeTooltip(activeGaugeTooltip === labelKey ? null : labelKey); }}
+        onClick={(e) => { 
+          e.stopPropagation();
+          const todayIso = new Date().toISOString().slice(0, 7);
+          const monthExpenses = expenses.filter(exp => exp.date && exp.date.slice(0, 7) === todayIso);
+          let catExpenses: Expense[] = [];
+          if (labelKey === 'ruleNeeds') {
+            catExpenses = monthExpenses.filter(exp => NEEDS_CATEGORIES.includes(exp.category));
+          } else if (labelKey === 'ruleWants') {
+            catExpenses = monthExpenses.filter(exp => !NEEDS_CATEGORIES.includes(exp.category));
+          }
+          setRuleDetailsModal({
+            labelKey, icon, color, amount: currentAmount, target: targetAmount,
+            expenses: catExpenses.sort((a,b) => Number(b.amount) - Number(a.amount))
+          });
+        }}
       >
         <svg width="100%" viewBox="8 5 84 66" style={{ overflow: 'visible', maxHeight: '70px' }}>
           <defs>
@@ -1975,40 +1963,11 @@ ${descriptionsToCategorize.join('\n')}`;
             <polygon points={`${base1X},${base1Y} ${base2X},${base2Y} ${tipX},${tipY}`} fill={needleColor} style={{ transition: 'fill 1s ease-out' }} />
           </g>
           <circle cx={cx} cy={cy} r="3.5" fill={needleColor} style={{ transition: 'fill 1s ease-out' }} />
-          <text x="50" y="68" fill={needleColor} fontSize="13" textAnchor="middle" fontWeight="700">{displayAmount.toFixed(0)}€</text>
+          <text x="50" y="68" fill={needleColor} fontSize="10" textAnchor="middle" fontWeight="700">{displayAmount.toFixed(0)}€ / {targetAmount.toFixed(0)}€</text>
         </svg>
         <span style={{ fontSize: '11px', color: '#8e8e93', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span>{icon}</span> {t(locale, labelKey)}
         </span>
-
-        {activeGaugeTooltip === labelKey && (
-          <div 
-            style={{ 
-              position: 'absolute', 
-              top: '80%', 
-              left: '50%', 
-              transform: 'translateX(-50%)', 
-              width: 'auto', 
-              padding: '6px 12px', 
-              backgroundColor: '#1c1c1f', 
-              border: '1px solid #2c2c2e', 
-              borderRadius: '12px', 
-              boxShadow: '0 8px 24px rgba(0,0,0,0.5)', 
-              zIndex: 100, 
-              textAlign: 'center',
-              cursor: 'default',
-              whiteSpace: 'nowrap'
-            }} 
-            onClick={(e) => e.stopPropagation()}
-          >
-            <strong style={{ color: color, display: 'block', fontSize: '11px', marginBottom: '2px' }}>
-              {targetPctOfIncome}% {t(locale, labelKey)}
-            </strong>
-            <div style={{ color: '#fff', fontWeight: '700', fontSize: '14px' }}>
-              {targetAmount.toFixed(0)}€
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -2322,15 +2281,6 @@ ${descriptionsToCategorize.join('\n')}`;
 
         {showDashboard && tab === 'analytics' && (
           <>
-            <style>{`
-              @keyframes insightFadeIn {
-                from { opacity: 0; transform: translateY(10px); }
-                to { opacity: 1; transform: translateY(0); }
-              }
-              .insight-banner {
-                animation: insightFadeIn 0.35s ease-out forwards;
-              }
-            `}</style>
             <section className="range-scroll-row">
               {RANGE_OPTIONS.map((option) => (
                 <button
@@ -2341,33 +2291,6 @@ ${descriptionsToCategorize.join('\n')}`;
                   {t(locale, option)}
                 </button>
               ))}
-            </section>
-
-            <section 
-              style={{
-                background: insightColors[displayInsight.color],
-                borderRadius: '12px',
-                  padding: '12px 16px',
-                display: 'flex',
-                alignItems: 'center',
-                  gap: '12px',
-                boxShadow: displayInsight.color === 'gray' ? 'none' : '0 4px 12px rgba(0, 0, 0, 0.15)',
-                marginTop: '10px',
-                  transition: 'all 0.3s ease',
-                  minHeight: '54px',
-                  cursor: 'pointer',
-                  userSelect: 'none',
-              }}
-                onClick={() => {
-                  setActiveInsightIndex(prev => (prev + 1) % allInsights.length);
-                }}
-                key={activeInsightIndex}
-                className="insight-banner"
-            >
-              <div style={{ fontSize: '24px', filter: displayInsight.color === 'gray' ? 'none' : 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }}>{displayInsight.icon}</div>
-              <div style={{ fontSize: '13.5px', lineHeight: 1.4, color: displayInsight.color === 'yellow' ? 'rgba(0,0,0,0.8)' : displayInsight.color === 'gray' ? '#d1d1d6' : '#fff', fontWeight: '500' }}>
-                <span dangerouslySetInnerHTML={{ __html: displayInsight.text }} />
-              </div>
             </section>
           </>
         )}
@@ -2444,6 +2367,7 @@ ${descriptionsToCategorize.join('\n')}`;
             analyticsCategoryUniverse={analyticsCategoryUniverse}
             expandedGroups={expandedGroups}
             setExpandedGroups={setExpandedGroups}
+            openEditExpense={openEditExpense}
           />
         )}
 
@@ -2483,6 +2407,7 @@ ${descriptionsToCategorize.join('\n')}`;
             handleSignOut={handleSignOut}
             importInputRef={importInputRef}
             handleImportCsv={handleImportCsv}
+            displayCategories={displayCategories}
           />
         )}
       </main>
@@ -3948,6 +3873,57 @@ ${descriptionsToCategorize.join('\n')}`;
             <button className="primary-btn" style={{ width: '100%', padding: '16px', fontSize: '16px', fontWeight: 'bold', borderRadius: '12px' }} onClick={handleHomeBudgetSave}>
               {t(locale, 'save')}
             </button>
+          </div>
+        </div>
+      )}
+
+      {ruleDetailsModal && (
+        <div className="modal-backdrop" onClick={() => setRuleDetailsModal(null)} style={{ zIndex: 1000 }}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '32px' }}>{ruleDetailsModal.icon}</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', color: '#fff' }}>{t(locale, ruleDetailsModal.labelKey)}</h3>
+                  <div style={{ color: '#8e8e93', fontSize: '13px', marginTop: '2px' }}>{t(locale, 'ruleTitle')}</div>
+                </div>
+              </div>
+              <button className="ghost-btn" style={{ padding: '8px' }} onClick={() => setRuleDetailsModal(null)}>
+                {t(locale, 'close')}
+              </button>
+            </div>
+            
+            <div style={{ padding: '16px', background: '#111214', borderRadius: '12px', border: '1px solid #2c2c2e', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <span style={{ color: '#8e8e93', fontSize: '14px', fontWeight: '500' }}>{t(locale, 'analyticsActual')}</span>
+                <strong style={{ fontSize: '20px', color: ruleDetailsModal.amount > ruleDetailsModal.target ? (ruleDetailsModal.labelKey === 'ruleSavings' ? '#32d74b' : '#ff453a') : '#fff' }}>{ruleDetailsModal.amount.toFixed(2)}€</strong>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', textAlign: 'right' }}>
+                <span style={{ color: '#8e8e93', fontSize: '14px', fontWeight: '500' }}>{t(locale, 'target')}</span>
+                <strong style={{ fontSize: '20px', color: '#fff' }}>{ruleDetailsModal.target.toFixed(2)}€</strong>
+              </div>
+            </div>
+
+            {ruleDetailsModal.labelKey === 'ruleSavings' ? (
+              <p style={{ margin: 'auto', fontSize: '14px', color: '#8e8e93', textAlign: 'center', padding: '32px 0' }}>
+                {t(locale, 'ruleSavingsEmpty')}
+              </p>
+            ) : (
+              <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+                {ruleDetailsModal.expenses.map((exp: any) => (
+                  <div key={exp.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', cursor: 'pointer' }} onClick={() => { setRuleDetailsModal(null); openEditExpense(exp); }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <span style={{ fontSize: '20px' }}>{exp.emoji}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ fontSize: '15px', fontWeight: '500', color: '#fff' }}>{exp.comment || getLocalizedCategoryName(locale, exp.category)}</span>
+                        <span style={{ fontSize: '12px', color: '#8e8e93' }}>{formatIsoDate(exp.date)} {exp.project ? ` • ${exp.project}` : ''}</span>
+                      </div>
+                    </div>
+                    <strong style={{ fontSize: '15px', color: '#fff' }}>{Number.parseFloat(exp.amount).toFixed(2)}€</strong>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
