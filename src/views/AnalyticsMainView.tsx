@@ -414,7 +414,7 @@ export function AnalyticsMainView(props: any) {
               )}
             </section>
 
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', paddingBottom: '16px', marginTop: '-4px' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', paddingBottom: '4px', marginTop: '-8px' }}>
               {Array.from({ length: range === 'day' ? 3 : 4 }).map((_, idx) => (
                 <div
                   key={`analytics-dot-${idx}`}
@@ -438,7 +438,7 @@ export function AnalyticsMainView(props: any) {
             </div>
 
             {hasActiveFilter && (
-              <section className="toolbar-row">
+              <section className="toolbar-row" style={{ marginBottom: '8px' }}>
                 <p className="filter-pill">
                   {t(locale, 'activeFilters')}:{' '}
                   {fromDate ? formatIsoDate(fromDate) : '—'} /{' '}
@@ -449,7 +449,7 @@ export function AnalyticsMainView(props: any) {
               </section>
             )}
 
-            <section className="panel list-panel">
+            <section className="panel list-panel" style={{ marginTop: '4px' }}>
               {analyticsGroups.map((group: any) => {
                 const expanded = expandedGroups[group.id] ?? group.isCurrent;
                 const aggregate: Record<string, { amount: number; emoji: string }> = {};
@@ -484,16 +484,36 @@ export function AnalyticsMainView(props: any) {
                           <p className="empty-line">{t(locale, 'noExpenses')}</p>
                         ) : (
                           rows.map((row: any) => {
-                            const fillPct = maxAmount > 0 ? Math.max(1, (row.amount / maxAmount) * 100) : 0;
-                            const isTightBar = fillPct <= 30;
+                            const fillPct = maxAmount > 0 ? (row.amount / maxAmount) * 100 : 0;
+                            const isTightBar = fillPct <= 20;
                             return (
                               <div key={`${group.id}_${row.name}`} className="bar-row">
                                 <div className="bar-label">
                                   <span>{row.emoji}</span>
                                   <strong>{row.name}</strong>
                                 </div>
-                                <div className="bar-track">
-                                  <div className={`bar-fill ${isTightBar ? 'tight' : ''}`} style={{ width: `${fillPct}%` }}>
+                                <div className="bar-track" style={{ position: 'relative' }}>
+                                  <div 
+                                    className="bar-fill" 
+                                    style={{ 
+                                      width: `${Math.max(0.5, fillPct)}%`, 
+                                      minWidth: '4px',
+                                      padding: 0
+                                    }} 
+                                  />
+                                  <div style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    bottom: 0,
+                                    left: isTightBar ? `calc(${Math.max(0.5, fillPct)}% + 8px)` : 'auto',
+                                    right: isTightBar ? 'auto' : `calc(100% - ${fillPct}% + 8px)`,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    color: isTightBar ? '#8e8e93' : '#fff',
+                                    fontSize: '11px',
+                                    fontWeight: '600',
+                                    zIndex: 2,
+                                  }}>
                                     {row.amount.toFixed(0)} €
                                   </div>
                                 </div>
