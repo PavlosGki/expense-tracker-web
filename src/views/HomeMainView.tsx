@@ -60,7 +60,7 @@ export function HomeMainView({
                 onClick={() => setRange(option)}
               >
                 <span>{t(locale, option)}</span>
-                <strong>{totals[option].toFixed(2)} €</strong>
+                <strong>{totals[option].toFixed(0)} €</strong>
               </button>
             ))}
           </section>
@@ -80,7 +80,7 @@ export function HomeMainView({
               <article key={group.id} className="group-card">
                 <button className="group-header" onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.id]: !expanded }))}>
                   <span>{group.title}</span>
-                  <strong>{group.total.toFixed(2)} €</strong>
+                  <strong>{group.total.toFixed(0)} €</strong>
                 </button>
                 {expanded && group.items.length > 0 && (
                   <div className="group-body">

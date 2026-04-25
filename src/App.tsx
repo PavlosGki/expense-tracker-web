@@ -1936,7 +1936,7 @@ ${descriptionsToCategorize.join('\n')}`;
     }
   };
 
-  const renderGauge = (label: string, targetPctOfIncome: number, currentAmount: number, color: string, icon: string, isSavings: boolean = false) => {
+  const renderGauge = (labelKey: string, targetPctOfIncome: number, currentAmount: number, color: string, icon: string, isSavings: boolean = false) => {
     const displayAmount = animateGauges ? currentAmount : 0;
     const targetAmount = parsedIncome * (targetPctOfIncome / 100);
     const currentPctOfIncome = parsedIncome > 0 ? (displayAmount / parsedIncome) * 100 : 0;
@@ -1951,29 +1951,17 @@ ${descriptionsToCategorize.join('\n')}`;
 
     const isOver = isSavings ? currentAmount < targetAmount : currentAmount > targetAmount;
     const needleColor = isOver ? (isSavings ? '#ff9f0a' : '#ff453a') : '#f5f5f7';
-    const pathId = `gauge-arc-${label.replace(/\s+/g, '-')}`;
-
-    const textStr = `${targetAmount.toFixed(0)}€`;
-    const arcLen = L * (targetPctOfIncome / 100);
-    const dynamicFontSize = Math.max(4.5, Math.min(8.5, arcLen / (textStr.length * 0.65)));
+    const pathId = `gauge-arc-${labelKey}`;
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, padding: '0 2px' }}>
-        <svg width="100%" viewBox="8 5 84 66" style={{ overflow: 'visible' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, padding: '0 2px', maxWidth: '110px' }}>
+        <svg width="100%" viewBox="8 5 84 66" style={{ overflow: 'visible', maxHeight: '70px' }}>
           <defs>
             <path id={pathId} d={`M 15 50 A 35 35 0 0 1 85 50`} />
           </defs>
           <path d={`M 15 50 A 35 35 0 0 1 85 50`} fill="none" stroke="#2c2c2e" strokeWidth="14" strokeLinecap="butt" />
           <path d={`M 15 50 A 35 35 0 0 1 85 50`} fill="none" stroke={color} strokeWidth="14" strokeLinecap="butt" strokeDasharray={`${L}`} strokeDashoffset={`${dashOffset}`} style={{ transition: animateGauges ? 'stroke-dashoffset 1s ease-out' : 'none' }} />
           
-          {parsedIncome > 0 && (
-            <text fill="#ffffff" fontSize={dynamicFontSize} fontWeight="800" dominantBaseline="central" opacity={animateGauges ? 1 : 0} style={{ transition: animateGauges ? 'opacity 0.5s ease-out 0.5s' : 'none' }}>
-              <textPath href={`#${pathId}`} startOffset={`${targetPctOfIncome / 2}%`} textAnchor="middle">
-                {textStr}
-              </textPath>
-            </text>
-          )}
-
           <g style={{ transform: `rotate(${needleRotation}deg)`, transformOrigin: `${cx}px ${cy}px`, transition: animateGauges ? 'transform 1.2s cubic-bezier(0.34, 1.56, 0.64, 1)' : 'none' }}>
             <polygon points={`${base1X},${base1Y} ${base2X},${base2Y} ${tipX},${tipY}`} fill={needleColor} style={{ transition: 'fill 1s ease-out' }} />
           </g>
@@ -1981,7 +1969,7 @@ ${descriptionsToCategorize.join('\n')}`;
           <text x="50" y="68" fill={isOver ? needleColor : '#f5f5f7'} fontSize="13" textAnchor="middle" fontWeight="700">{displayAmount.toFixed(0)}€</text>
         </svg>
         <span style={{ fontSize: '11px', color: '#8e8e93', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <span>{icon}</span> {label}
+          <span>{icon}</span> {t(locale, labelKey)}
         </span>
       </div>
     );
@@ -2130,7 +2118,7 @@ ${descriptionsToCategorize.join('\n')}`;
                 </h3>
                 <div className="budget-bar-wrap">
                   {currentMonthSpend > 0 && (
-                    <strong className="budget-spent-value">{(parsedIncome - currentMonthSpend).toFixed(2)} €</strong>
+                    <strong className="budget-spent-value">{(parsedIncome - currentMonthSpend).toFixed(0)} €</strong>
                   )}
                   <div className="progress-track budget-track">
                     <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - visualProgressPct)}%` }} />
@@ -2159,7 +2147,7 @@ ${descriptionsToCategorize.join('\n')}`;
                     onClick={(e) => { e.stopPropagation(); setHomeBudgetEditValue(budgetInputValue); setHomeBudgetEditModal('monthly'); }} 
                     style={{ cursor: 'pointer' }}
                   >
-                    {parsedIncome.toFixed(2)} €
+                    {parsedIncome.toFixed(0)} €
                   </strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
@@ -2198,7 +2186,7 @@ ${descriptionsToCategorize.join('\n')}`;
                 </h3>
                 <div className="budget-bar-wrap">
                   {totals.year > 0 && (
-                    <strong className="budget-spent-value">{(parsedYearly - totals.year).toFixed(2)} €</strong>
+                    <strong className="budget-spent-value">{(parsedYearly - totals.year).toFixed(0)} €</strong>
                   )}
                   <div className="progress-track budget-track">
                     <div className="progress-fill budget-fill" style={{ width: `${Math.max(0, 100 - visualYearlyProgressPct)}%` }} />
@@ -2227,7 +2215,7 @@ ${descriptionsToCategorize.join('\n')}`;
                     onClick={(e) => { e.stopPropagation(); setHomeBudgetEditValue(yearlyBudgetInputValue); setHomeBudgetEditModal('yearly'); }} 
                     style={{ cursor: 'pointer' }}
                   >
-                    {parsedYearly.toFixed(2)} €
+                    {parsedYearly.toFixed(0)} €
                   </strong>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
@@ -2257,49 +2245,49 @@ ${descriptionsToCategorize.join('\n')}`;
               </section>
 
               {/* Slide 3: 50/30/20 Gauges */}
-              <section className="panel budget-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <section className="panel budget-panel" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
                   <h3 className="budget-title" style={{ margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={(e) => { e.stopPropagation(); setShowRuleTooltip(true); }}>
-                    ΚΑΝΟΝΑΣ 50/30/20
+                    {t(locale, 'ruleTitle')}
                     <svg viewBox="0 0 24 24" width="14" height="14" stroke="#8e8e93" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '4px' }}><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
                   </h3>
                   {showRuleTooltip && (
                     <div style={{ position: 'absolute', top: '24px', left: '0', width: '220px', padding: '10px', backgroundColor: '#1c1c1f', border: '1px solid #2c2c2e', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 100, color: '#f5f5f7', fontSize: '11px', lineHeight: '1.4' }} onClick={(e) => e.stopPropagation()}>
-                      <strong style={{ color: '#fff', display: 'block', marginBottom: '6px', fontSize: '12px' }}>Κανόνας 50/30/20</strong>
+                      <strong style={{ color: '#fff', display: 'block', marginBottom: '6px', fontSize: '12px' }}>{t(locale, 'ruleTitle')}</strong>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>50% Ανάγκες:</span> Στέγαση, λογαριασμοί, s/m.</div>
-                        <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>30% Επιθυμίες:</span> Διασκέδαση, ψώνια, χόμπι.</div>
-                        <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>20% Αποταμίευση:</span> Αποταμίευση, επενδύσεις.</div>
+                        <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>50% {t(locale, 'ruleNeeds')}:</span> {t(locale, 'ruleNeedsDesc')}</div>
+                        <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>30% {t(locale, 'ruleWants')}:</span> {t(locale, 'ruleWantsDesc')}</div>
+                        <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>20% {t(locale, 'ruleSavings')}:</span> {t(locale, 'ruleSavingsDesc')}</div>
                       </div>
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', width: '100%' }}>
-                  {renderGauge('Ανάγκες', 50, currentNeeds, '#0a84ff', '🏠')}
-                  {renderGauge('Επιθυμίες', 30, currentWants, '#ff9f0a', '🍕')}
-                  {renderGauge('Αποταμίευση', 20, currentSavings, '#32d74b', '🏦', true)}
+                <div style={{ flex: 1, display: 'flex', justifyContent: 'space-evenly', gap: '8px', alignItems: 'center', width: '100%' }}>
+                  {renderGauge('ruleNeeds', 50, currentNeeds, '#0a84ff', '🏠')}
+                  {renderGauge('ruleWants', 30, currentWants, '#ff9f0a', '🍕')}
+                  {renderGauge('ruleSavings', 20, currentSavings, '#32d74b', '🏦', true)}
                 </div>
               </section>
 
               {/* Slide 4: 50/30/20 Stacked Bar */}
-              <section className="panel budget-panel" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <section className="panel budget-panel" style={{ display: 'flex', flexDirection: 'column' }}>
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
                   <h3 className="budget-title" style={{ margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={(e) => { e.stopPropagation(); setShowRuleTooltip(true); }}>
-                    ΚΑΝΟΝΑΣ 50/30/20
+                    {t(locale, 'ruleTitle')}
                     <svg viewBox="0 0 24 24" width="14" height="14" stroke="#8e8e93" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '4px' }}><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
                   </h3>
                   {showRuleTooltip && (
                     <div style={{ position: 'absolute', top: '24px', left: '0', width: '220px', padding: '10px', backgroundColor: '#1c1c1f', border: '1px solid #2c2c2e', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 100, color: '#f5f5f7', fontSize: '11px', lineHeight: '1.4' }} onClick={(e) => e.stopPropagation()}>
-                      <strong style={{ color: '#fff', display: 'block', marginBottom: '6px', fontSize: '12px' }}>Κανόνας 50/30/20</strong>
+                      <strong style={{ color: '#fff', display: 'block', marginBottom: '6px', fontSize: '12px' }}>{t(locale, 'ruleTitle')}</strong>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>50% Ανάγκες:</span> Στέγαση, λογαριασμοί, s/m.</div>
-                        <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>30% Επιθυμίες:</span> Διασκέδαση, ψώνια, χόμπι.</div>
-                        <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>20% Αποταμίευση:</span> Αποταμίευση, επενδύσεις.</div>
+                        <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>50% {t(locale, 'ruleNeeds')}:</span> {t(locale, 'ruleNeedsDesc')}</div>
+                        <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>30% {t(locale, 'ruleWants')}:</span> {t(locale, 'ruleWantsDesc')}</div>
+                        <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>20% {t(locale, 'ruleSavings')}:</span> {t(locale, 'ruleSavingsDesc')}</div>
                       </div>
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '8px', width: '100%' }}>
                   <div style={{ position: 'relative', width: '100%' }}>
                     <div style={{ height: '28px', width: '100%', display: 'flex', borderRadius: '0', overflow: 'hidden', backgroundColor: '#1c1c1f', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)' }}>
                       {parsedIncome > 0 && (
@@ -2327,15 +2315,15 @@ ${descriptionsToCategorize.join('\n')}`;
                   {parsedIncome > 0 && (
                     <div style={{ display: 'flex', width: '100%', fontSize: '11px', fontWeight: '600', color: '#8e8e93', textAlign: 'center' }}>
                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ color: '#0a84ff', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>ΑΝΑΓΚΕΣ <span style={{ opacity: 0.7 }}>50%</span></span>
+                        <span style={{ color: '#0a84ff', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', textTransform: 'uppercase' }}>{t(locale, 'ruleNeeds')} <span style={{ opacity: 0.7 }}>50%</span></span>
                         <span style={{ color: currentNeeds > targetNeeds ? '#ff453a' : '#f5f5f7' }}>{currentNeeds.toFixed(0)}€ / {targetNeeds.toFixed(0)}€</span>
                       </div>
                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ color: '#ff9f0a', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>ΕΠΙΘΥΜΙΕΣ <span style={{ opacity: 0.7 }}>30%</span></span>
+                        <span style={{ color: '#ff9f0a', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', textTransform: 'uppercase' }}>{t(locale, 'ruleWants')} <span style={{ opacity: 0.7 }}>30%</span></span>
                         <span style={{ color: currentWants > targetWants ? '#ff453a' : '#f5f5f7' }}>{currentWants.toFixed(0)}€ / {targetWants.toFixed(0)}€</span>
                       </div>
                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ color: '#32d74b', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>ΑΠΟΤΑΜΙΕΥΣΗ <span style={{ opacity: 0.7 }}>20%</span></span>
+                        <span style={{ color: '#32d74b', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', textTransform: 'uppercase' }}>{t(locale, 'ruleSavings')} <span style={{ opacity: 0.7 }}>20%</span></span>
                         <span style={{ color: '#f5f5f7' }}>{currentSavings.toFixed(0)}€ / {(parsedIncome * 0.2).toFixed(0)}€</span>
                       </div>
                     </div>
