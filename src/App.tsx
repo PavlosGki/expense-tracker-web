@@ -188,9 +188,9 @@ export default function App() {
   const analyticsScrollLeftRef = useRef(0);
   const isClickPreventedRef = useRef(false);
   const donutListRef = useRef<HTMLDivElement | null>(null);
+  const [activeGaugeTooltip, setActiveGaugeTooltip] = useState<string | null>(null);
   const [showRuleTooltip, setShowRuleTooltip] = useState(false);
   const [animateGauges, setAnimateGauges] = useState(false);
-  const [animateStackedBar, setAnimateStackedBar] = useState(false);
 
   useEffect(() => {
     if (!markerTooltip) return;
@@ -203,6 +203,15 @@ export default function App() {
 
     return () => window.removeEventListener('click', closeTooltip);
   }, [markerTooltip]);
+
+  useEffect(() => {
+    if (!activeGaugeTooltip) return;
+    const closeTooltip = () => setActiveGaugeTooltip(null);
+    setTimeout(() => {
+      window.addEventListener('click', closeTooltip);
+    }, 0);
+    return () => window.removeEventListener('click', closeTooltip);
+  }, [activeGaugeTooltip]);
 
   useEffect(() => {
     if (!showRuleTooltip) return;
@@ -219,15 +228,6 @@ export default function App() {
       return () => clearTimeout(timer);
     } else {
       setAnimateGauges(false);
-    }
-  }, [activeBudgetSlide]);
-
-  useEffect(() => {
-    if (activeBudgetSlide === 3) {
-      const timer = setTimeout(() => setAnimateStackedBar(true), 100);
-      return () => clearTimeout(timer);
-    } else {
-      setAnimateStackedBar(false);
     }
   }, [activeBudgetSlide]);
 
@@ -844,8 +844,8 @@ export default function App() {
     const todayIso = new Date().toISOString().slice(0, 7);
     let needs = 0;
     let wants = 0;
-    filteredExpenses.forEach(exp => {
-      if (exp.date.slice(0, 7) === todayIso) {
+    expenses.forEach(exp => {
+      if (exp.date && exp.date.slice(0, 7) === todayIso) {
         const amount = Number.parseFloat(exp.amount) || 0;
         if (NEEDS_CATEGORIES.includes(exp.category)) {
           needs += amount;
@@ -856,7 +856,7 @@ export default function App() {
       }
     });
     return { needsMonthTotal: needs, wantsMonthTotal: wants };
-  }, [filteredExpenses]);
+  }, [expenses]);
 
   const targetNeeds = parsedIncome * 0.5;
   const targetWants = parsedIncome * 0.3;
@@ -1949,12 +1949,21 @@ ${descriptionsToCategorize.join('\n')}`;
     const base1X = cx - 2.5, base1Y = cy;
     const base2X = cx + 2.5, base2Y = cy;
 
-    const isOver = isSavings ? currentAmount < targetAmount : currentAmount > targetAmount;
-    const needleColor = isOver ? (isSavings ? '#ff9f0a' : '#ff453a') : '#f5f5f7';
+    const isOverTarget = currentAmount > targetAmount;
+    let needleColor = '#f5f5f7';
+    if (isSavings) {
+      if (isOverTarget) needleColor = '#32d74b';
+    } else {
+      if (isOverTarget) needleColor = '#ff453a';
+    }
+    
     const pathId = `gauge-arc-${labelKey}`;
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, padding: '0 2px', maxWidth: '110px' }}>
+      <div 
+        style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, padding: '0 2px', maxWidth: '110px', cursor: 'pointer' }}
+        onClick={(e) => { e.stopPropagation(); setActiveGaugeTooltip(activeGaugeTooltip === labelKey ? null : labelKey); }}
+      >
         <svg width="100%" viewBox="8 5 84 66" style={{ overflow: 'visible', maxHeight: '70px' }}>
           <defs>
             <path id={pathId} d={`M 15 50 A 35 35 0 0 1 85 50`} />
@@ -1966,11 +1975,40 @@ ${descriptionsToCategorize.join('\n')}`;
             <polygon points={`${base1X},${base1Y} ${base2X},${base2Y} ${tipX},${tipY}`} fill={needleColor} style={{ transition: 'fill 1s ease-out' }} />
           </g>
           <circle cx={cx} cy={cy} r="3.5" fill={needleColor} style={{ transition: 'fill 1s ease-out' }} />
-          <text x="50" y="68" fill={isOver ? needleColor : '#f5f5f7'} fontSize="13" textAnchor="middle" fontWeight="700">{displayAmount.toFixed(0)}€</text>
+          <text x="50" y="68" fill={needleColor} fontSize="13" textAnchor="middle" fontWeight="700">{displayAmount.toFixed(0)}€</text>
         </svg>
         <span style={{ fontSize: '11px', color: '#8e8e93', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span>{icon}</span> {t(locale, labelKey)}
         </span>
+
+        {activeGaugeTooltip === labelKey && (
+          <div 
+            style={{ 
+              position: 'absolute', 
+              top: '80%', 
+              left: '50%', 
+              transform: 'translateX(-50%)', 
+              width: 'auto', 
+              padding: '6px 12px', 
+              backgroundColor: '#1c1c1f', 
+              border: '1px solid #2c2c2e', 
+              borderRadius: '12px', 
+              boxShadow: '0 8px 24px rgba(0,0,0,0.5)', 
+              zIndex: 100, 
+              textAlign: 'center',
+              cursor: 'default',
+              whiteSpace: 'nowrap'
+            }} 
+            onClick={(e) => e.stopPropagation()}
+          >
+            <strong style={{ color: color, display: 'block', fontSize: '11px', marginBottom: '2px' }}>
+              {targetPctOfIncome}% {t(locale, labelKey)}
+            </strong>
+            <div style={{ color: '#fff', fontWeight: '700', fontSize: '14px' }}>
+              {targetAmount.toFixed(0)}€
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -2253,11 +2291,10 @@ ${descriptionsToCategorize.join('\n')}`;
                   </h3>
                   {showRuleTooltip && (
                     <div style={{ position: 'absolute', top: '24px', left: '0', width: '220px', padding: '10px', backgroundColor: '#1c1c1f', border: '1px solid #2c2c2e', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 100, color: '#f5f5f7', fontSize: '11px', lineHeight: '1.4' }} onClick={(e) => e.stopPropagation()}>
-                      <strong style={{ color: '#fff', display: 'block', marginBottom: '6px', fontSize: '12px' }}>{t(locale, 'ruleTitle')}</strong>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>50% {t(locale, 'ruleNeeds')}:</span> {t(locale, 'ruleNeedsDesc')}</div>
-                        <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>30% {t(locale, 'ruleWants')}:</span> {t(locale, 'ruleWantsDesc')}</div>
-                        <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>20% {t(locale, 'ruleSavings')}:</span> {t(locale, 'ruleSavingsDesc')}</div>
+                        <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>{t(locale, 'ruleNeeds')}:</span> {t(locale, 'ruleNeedsDesc')}</div>
+                        <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>{t(locale, 'ruleWants')}:</span> {t(locale, 'ruleWantsDesc')}</div>
+                        <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>{t(locale, 'ruleSavings')}:</span> {t(locale, 'ruleSavingsDesc')}</div>
                       </div>
                     </div>
                   )}
@@ -2268,71 +2305,9 @@ ${descriptionsToCategorize.join('\n')}`;
                   {renderGauge('ruleSavings', 20, currentSavings, '#32d74b', '🏦', true)}
                 </div>
               </section>
-
-              {/* Slide 4: 50/30/20 Stacked Bar */}
-              <section className="panel budget-panel" style={{ display: 'flex', flexDirection: 'column' }}>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
-                  <h3 className="budget-title" style={{ margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={(e) => { e.stopPropagation(); setShowRuleTooltip(true); }}>
-                    {t(locale, 'ruleTitle')}
-                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="#8e8e93" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '4px' }}><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
-                  </h3>
-                  {showRuleTooltip && (
-                    <div style={{ position: 'absolute', top: '24px', left: '0', width: '220px', padding: '10px', backgroundColor: '#1c1c1f', border: '1px solid #2c2c2e', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 100, color: '#f5f5f7', fontSize: '11px', lineHeight: '1.4' }} onClick={(e) => e.stopPropagation()}>
-                      <strong style={{ color: '#fff', display: 'block', marginBottom: '6px', fontSize: '12px' }}>{t(locale, 'ruleTitle')}</strong>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>50% {t(locale, 'ruleNeeds')}:</span> {t(locale, 'ruleNeedsDesc')}</div>
-                        <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>30% {t(locale, 'ruleWants')}:</span> {t(locale, 'ruleWantsDesc')}</div>
-                        <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>20% {t(locale, 'ruleSavings')}:</span> {t(locale, 'ruleSavingsDesc')}</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '8px', width: '100%' }}>
-                  <div style={{ position: 'relative', width: '100%' }}>
-                    <div style={{ height: '28px', width: '100%', display: 'flex', borderRadius: '0', overflow: 'hidden', backgroundColor: '#1c1c1f', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)' }}>
-                      {parsedIncome > 0 && (
-                        <>
-                          <div style={{ width: `${animateStackedBar ? (currentNeeds / parsedIncome) * 100 : 0}%`, backgroundColor: '#0a84ff', height: '100%', transition: animateStackedBar ? 'width 1s ease-out' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                            {((currentNeeds / parsedIncome) * 100) >= 10 && <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff', whiteSpace: 'nowrap' }}>{((currentNeeds / parsedIncome) * 100).toFixed(0)}%</span>}
-                          </div>
-                          <div style={{ width: `${animateStackedBar ? (currentWants / parsedIncome) * 100 : 0}%`, backgroundColor: '#ff9f0a', height: '100%', transition: animateStackedBar ? 'width 1s ease-out' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                            {((currentWants / parsedIncome) * 100) >= 10 && <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff', whiteSpace: 'nowrap' }}>{((currentWants / parsedIncome) * 100).toFixed(0)}%</span>}
-                          </div>
-                          <div style={{ width: `${animateStackedBar ? (currentSavings / parsedIncome) * 100 : 0}%`, backgroundColor: '#32d74b', height: '100%', transition: animateStackedBar ? 'width 1s ease-out' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                            {((currentSavings / parsedIncome) * 100) >= 10 && <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff', whiteSpace: 'nowrap' }}>{((currentSavings / parsedIncome) * 100).toFixed(0)}%</span>}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {parsedIncome > 0 && (
-                    <div style={{ width: '100%', height: '4px', display: 'flex', borderRadius: '0', overflow: 'hidden', opacity: 0.8 }}>
-                      <div style={{ width: '50%', backgroundColor: '#0a84ff' }} />
-                      <div style={{ width: '30%', backgroundColor: '#ff9f0a' }} />
-                      <div style={{ width: '20%', backgroundColor: '#32d74b' }} />
-                    </div>
-                  )}
-                  {parsedIncome > 0 && (
-                    <div style={{ display: 'flex', width: '100%', fontSize: '11px', fontWeight: '600', color: '#8e8e93', textAlign: 'center' }}>
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ color: '#0a84ff', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', textTransform: 'uppercase' }}>{t(locale, 'ruleNeeds')} <span style={{ opacity: 0.7 }}>50%</span></span>
-                        <span style={{ color: currentNeeds > targetNeeds ? '#ff453a' : '#f5f5f7' }}>{currentNeeds.toFixed(0)}€ / {targetNeeds.toFixed(0)}€</span>
-                      </div>
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ color: '#ff9f0a', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', textTransform: 'uppercase' }}>{t(locale, 'ruleWants')} <span style={{ opacity: 0.7 }}>30%</span></span>
-                        <span style={{ color: currentWants > targetWants ? '#ff453a' : '#f5f5f7' }}>{currentWants.toFixed(0)}€ / {targetWants.toFixed(0)}€</span>
-                      </div>
-                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <span style={{ color: '#32d74b', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', textTransform: 'uppercase' }}>{t(locale, 'ruleSavings')} <span style={{ opacity: 0.7 }}>20%</span></span>
-                        <span style={{ color: '#f5f5f7' }}>{currentSavings.toFixed(0)}€ / {(parsedIncome * 0.2).toFixed(0)}€</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </section>
             </div>
             <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', paddingBottom: '4px', marginTop: '-8px' }}>
-              {[0, 1, 2, 3].map(idx => (
+              {[0, 1, 2].map(idx => (
                 <div 
                   key={idx}
                   style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: activeBudgetSlide === idx ? '#f5f5f7' : '#48484a', transition: 'background-color 0.3s ease', cursor: 'pointer' }} 
