@@ -28,6 +28,15 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'c24', name: 'Καθαριστήριο', emoji: '🧺', isDefault: true },
 ];
 
+export const NEEDS_CATEGORIES = [
+  'Supermarket', 'Λογαριασμοί', 'Καύσιμα', 'Διόδια', 'Φαρμακείο', 'Σπίτι', 
+  'Μετακινήσεις', 'Υγεία', 'Καθαριστήριο', 'Κατοικίδια', 'Παιδιά', 'Εκπαίδευση'
+];
+
+export const WANTS_CATEGORIES = [
+  'Φαγητό', 'Καφές', 'Διασκέδαση', 'Γυμναστήριο', 'Gaming', 'Ταξίδια', 
+  'Ρούχα', 'Taxi', 'Συνδρομές', 'Δώρα', 'Ηλεκτρονικά', 'Ομορφιά'
+];
 export const RANGE_OPTIONS: Range[] = ['day', 'week', 'month', 'year'];
 export const NEW_CATEGORY_VALUE = '__new_category__';
 export const NO_PROJECT_VALUE = '__no_project__';
