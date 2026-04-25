@@ -51,6 +51,17 @@ export function HomeMainView({
   const scrollLeftRef = useRef(0);
   const [animated, setAnimated] = useState(false);
 
+  const [showRuleTooltip, setShowRuleTooltip] = useState(false);
+
+  useEffect(() => {
+    if (!showRuleTooltip) return;
+    const closeTooltip = () => setShowRuleTooltip(false);
+    setTimeout(() => {
+      window.addEventListener('click', closeTooltip);
+    }, 0);
+    return () => window.removeEventListener('click', closeTooltip);
+  }, [showRuleTooltip]);
+
   useEffect(() => {
     const timer = setTimeout(() => setAnimated(true), 100);
     return () => clearTimeout(timer);
@@ -68,21 +79,11 @@ export function HomeMainView({
   const wantsPct = targetWants > 0 ? (currentWants / targetWants) * 100 : 0;
   const savingsPct = targetSavings > 0 ? (currentSavings / targetSavings) * 100 : 0;
 
-  const visualNeedsPct = Math.min(100, needsPct);
-  const visualWantsPct = Math.min(100, wantsPct);
-  const visualSavingsPct = Math.min(100, savingsPct);
-
-  // Dynamic scaling logic for horizontal bars
-  const requiredNeeds = Math.max(50, (needsPct / 100) * 50);
-  const requiredWants = Math.max(30, (wantsPct / 100) * 30);
-  const requiredSavings = Math.max(20, (savingsPct / 100) * 20);
-
-  const maxRequired = Math.max(requiredNeeds, requiredWants, requiredSavings);
-  const dynamicScale = 100 / maxRequired;
-
-  const trackWidthNeeds = 50 * dynamicScale;
-  const trackWidthWants = 30 * dynamicScale;
-  const trackWidthSavings = 20 * dynamicScale;
+  const ruleSegments = [
+    { label: 'Ανάγκες', target: 50, amount: currentNeeds, color: '#0a84ff', icon: '🏠' },
+    { label: 'Επιθυμίες', target: 30, amount: currentWants, color: '#ff9f0a', icon: '🍕' },
+    { label: 'Αποταμίευση', target: 20, amount: currentSavings, color: '#32d74b', icon: '🏦' },
+  ];
 
   // Gauge Render Helper
   const renderGauge = (label: string, targetPctOfIncome: number, currentAmount: number, color: string, icon: string, isSavings: boolean = false) => {
@@ -110,10 +111,14 @@ export function HomeMainView({
     const needleColor = isOver ? (isSavings ? '#ff9f0a' : '#ff453a') : '#f5f5f7';
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, padding: '0 4px' }}>
-        <svg width="100%" viewBox="0 0 100 70" style={{ overflow: 'visible' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, padding: '0 2px' }}>
+        <svg 
+          width="100%" 
+          viewBox="8 5 84 66" 
+          style={{ overflow: 'visible' }}
+        >
           {/* Background track (Total Income) */}
-          <path d={`M 15 50 A 35 35 0 0 1 85 50`} fill="none" stroke="#2c2c2e" strokeWidth="10" strokeLinecap="round" />
+          <path d={`M 15 50 A 35 35 0 0 1 85 50`} fill="none" stroke="#2c2c2e" strokeWidth="10" strokeLinecap="butt" />
           
           {/* Colored target area */}
           <path 
@@ -121,7 +126,7 @@ export function HomeMainView({
             fill="none" 
             stroke={color} 
             strokeWidth="10" 
-            strokeLinecap="round" 
+            strokeLinecap="butt" 
             strokeDasharray={`${L}`} 
             strokeDashoffset={`${dashOffset}`} 
             style={{ transition: 'stroke-dashoffset 1s ease-out' }}
@@ -140,11 +145,11 @@ export function HomeMainView({
           <circle cx={cx} cy={cy} r="3.5" fill={needleColor} style={{ transition: 'fill 1s ease-out' }} />
           
           {/* Current Amount */}
-          <text x="50" y="68" fill={isOver ? needleColor : '#f5f5f7'} fontSize="12" textAnchor="middle" fontWeight="700">
+          <text x="50" y="68" fill={isOver ? needleColor : '#f5f5f7'} fontSize="13" textAnchor="middle" fontWeight="700">
             {displayAmount.toFixed(0)}€
           </text>
         </svg>
-        <span style={{ fontSize: '10px', color: '#8e8e93', marginTop: '2px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <span style={{ fontSize: '11px', color: '#8e8e93', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
           <span>{icon}</span> {label}
         </span>
       </div>
@@ -170,7 +175,29 @@ export function HomeMainView({
 
           <section className="panel rule-panel" style={{ marginTop: '16px', padding: '16px 0 0 0', overflow: 'hidden' }}>
             <div style={{ padding: '0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 className="budget-title" style={{ margin: 0, fontSize: '13px' }}>ΚΑΝΟΝΑΣ 50/30/20</h3>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <h3 
+                  className="budget-title" 
+                  style={{ margin: 0, fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  onClick={(e) => { e.stopPropagation(); setShowRuleTooltip(true); }}
+                >
+                  ΚΑΝΟΝΑΣ 50/30/20
+                  <svg viewBox="0 0 24 24" width="14" height="14" stroke="#8e8e93" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+                </h3>
+                {showRuleTooltip && (
+                  <div 
+                    style={{ position: 'absolute', top: '24px', left: '0', width: '220px', padding: '10px', backgroundColor: '#1c1c1f', border: '1px solid #2c2c2e', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 100, color: '#f5f5f7', fontSize: '11px', lineHeight: '1.4' }} 
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <strong style={{ color: '#fff', display: 'block', marginBottom: '6px', fontSize: '12px' }}>Κανόνας 50/30/20</strong>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>50% Ανάγκες:</span> Στέγαση, λογαριασμοί, s/m.</div>
+                      <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>30% Επιθυμίες:</span> Διασκέδαση, ψώνια, χόμπι.</div>
+                      <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>20% Αποταμίευση:</span> Αποταμίευση, επενδύσεις.</div>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div style={{ display: 'flex', gap: '6px' }}>
                 {[0, 1].map((i) => (
                   <div
@@ -243,58 +270,88 @@ export function HomeMainView({
             >
               <style>{`.budget-carousel::-webkit-scrollbar { display: none; }`}</style>
 
-              {/* Slide 1: True Gauges */}
-              <div className="budget-panel" style={{ flex: '0 0 100%', scrollSnapAlign: 'start', padding: '0 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: '100%' }}>
+              {/* Slide 1: Gauges */}
+              <div className="budget-panel" style={{ flex: '0 0 100%', scrollSnapAlign: 'start', padding: '0 16px', display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center' }}>
                 {renderGauge('Ανάγκες', 50, currentNeeds, '#0a84ff', '🏠')}
                 {renderGauge('Επιθυμίες', 30, currentWants, '#ff9f0a', '🍕')}
                 {renderGauge('Αποταμίευση', 20, currentSavings, '#32d74b', '🏦', true)}
               </div>
 
-              {/* Slide 2: Proportional Bars */}
-              <div className="budget-panel" style={{ flex: '0 0 100%', scrollSnapAlign: 'start', padding: '0 16px', display: 'flex', flexDirection: 'column', gap: '16px', justifyContent: 'center' }}>
-                <div className="rule-bucket">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '0.85rem', color: '#f5f5f7', fontWeight: 600 }}>🏠 Ανάγκες (50%)</span>
-                    <span style={{ fontSize: '0.85rem', color: needsPct > 100 ? '#ff453a' : '#8e8e93' }}>
-                      {currentNeeds.toFixed(0)}€ / {targetNeeds.toFixed(0)}€
-                    </span>
+              {/* Slide 2: 50/30/20 Stack Bar */}
+              <div className="budget-panel" style={{ flex: '0 0 100%', scrollSnapAlign: 'start', padding: '0 16px', display: 'flex', flexDirection: 'column', gap: '16px', justifyContent: 'center', color: '#f5f5f7' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <div style={{
+                      height: '28px',
+                      width: '100%',
+                      display: 'flex',
+                      borderRadius: '0',
+                      overflow: 'hidden',
+                      backgroundColor: '#1c1c1f',
+                      boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)',
+                    }}>
+                      {income > 0 && (
+                        <>
+                          <div style={{ 
+                            width: `${animated ? (currentNeeds / income) * 100 : 0}%`, 
+                            backgroundColor: '#0a84ff', 
+                            height: '100%', 
+                            transition: 'width 1s ease-out',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            overflow: 'hidden'
+                          }}>
+                            {((currentNeeds / income) * 100) >= 10 && <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff', whiteSpace: 'nowrap' }}>{((currentNeeds / income) * 100).toFixed(0)}%</span>}
+                          </div>
+                          <div style={{ 
+                            width: `${animated ? (currentWants / income) * 100 : 0}%`, 
+                            backgroundColor: '#ff9f0a', 
+                            height: '100%', 
+                            transition: 'width 1s ease-out',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            overflow: 'hidden'
+                          }}>
+                            {((currentWants / income) * 100) >= 10 && <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff', whiteSpace: 'nowrap' }}>{((currentWants / income) * 100).toFixed(0)}%</span>}
+                          </div>
+                          <div style={{ 
+                            width: `${animated ? (currentSavings / income) * 100 : 0}%`, 
+                            backgroundColor: '#32d74b', 
+                            height: '100%', 
+                            transition: 'width 1s ease-out',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            overflow: 'hidden'
+                          }}>
+                            {((currentSavings / income) * 100) >= 10 && <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#fff', whiteSpace: 'nowrap' }}>{((currentSavings / income) * 100).toFixed(0)}%</span>}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div className="progress-track" style={{ marginTop: 0, height: '10px', width: `${trackWidthNeeds}%`, position: 'relative', overflow: 'visible', borderRadius: '5px', backgroundColor: '#2c2c2e', transition: 'width 0.3s ease' }}>
-                    <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${visualNeedsPct}%`, backgroundColor: '#0a84ff', borderRadius: '5px' }} />
-                    {needsPct > 100 && (
-                      <div style={{ position: 'absolute', top: 0, left: '100%', height: '100%', width: `${needsPct - 100}%`, backgroundColor: '#ff453a', borderRadius: '0 5px 5px 0' }} />
-                    )}
-                  </div>
-                </div>
 
-                <div className="rule-bucket">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '0.85rem', color: '#f5f5f7', fontWeight: 600 }}>🍕 Επιθυμίες (30%)</span>
-                    <span style={{ fontSize: '0.85rem', color: wantsPct > 100 ? '#ff453a' : '#8e8e93' }}>
-                      {currentWants.toFixed(0)}€ / {targetWants.toFixed(0)}€
-                    </span>
-                  </div>
-                  <div className="progress-track" style={{ marginTop: 0, height: '10px', width: `${trackWidthWants}%`, position: 'relative', overflow: 'visible', borderRadius: '5px', backgroundColor: '#2c2c2e', transition: 'width 0.3s ease' }}>
-                    <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${visualWantsPct}%`, backgroundColor: '#ff9f0a', borderRadius: '5px' }} />
-                    {wantsPct > 100 && (
-                      <div style={{ position: 'absolute', top: 0, left: '100%', height: '100%', width: `${wantsPct - 100}%`, backgroundColor: '#ff453a', borderRadius: '0 5px 5px 0' }} />
-                    )}
-                  </div>
-                </div>
+                  {/* Ideal Ratio Thin Bar */}
+                  {income > 0 && (
+                    <div style={{ width: '100%', height: '4px', display: 'flex', borderRadius: '0', overflow: 'hidden', opacity: 0.8 }}>
+                      <div style={{ width: '50%', backgroundColor: '#0a84ff' }} />
+                      <div style={{ width: '30%', backgroundColor: '#ff9f0a' }} />
+                      <div style={{ width: '20%', backgroundColor: '#32d74b' }} />
+                    </div>
+                  )}
 
-                <div className="rule-bucket">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '0.85rem', color: '#f5f5f7', fontWeight: 600 }}>🏦 Αποταμίευση (20%)</span>
-                    <span style={{ fontSize: '0.85rem', color: '#8e8e93' }}>
-                      {currentSavings.toFixed(0)}€ / {targetSavings.toFixed(0)}€
-                    </span>
-                  </div>
-                  <div className="progress-track" style={{ marginTop: 0, height: '10px', width: `${trackWidthSavings}%`, position: 'relative', overflow: 'visible', borderRadius: '5px', backgroundColor: '#2c2c2e', transition: 'width 0.3s ease' }}>
-                    <div style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: `${visualSavingsPct}%`, backgroundColor: currentSavings < targetSavings ? '#ff9f0a' : '#32d74b', borderRadius: '5px' }} />
-                    {savingsPct > 100 && (
-                      <div style={{ position: 'absolute', top: 0, left: '100%', height: '100%', width: `${savingsPct - 100}%`, backgroundColor: '#30b043', borderRadius: '0 5px 5px 0' }} />
-                    )}
-                  </div>
+                  {income > 0 && (
+                    <div style={{ display: 'flex', width: '100%', fontSize: '11px', fontWeight: '600', color: '#8e8e93', textAlign: 'center' }}>
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={{ color: '#0a84ff', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>ΑΝΑΓΚΕΣ <span style={{ opacity: 0.7 }}>50%</span></span>
+                        <span style={{ color: currentNeeds > targetNeeds ? '#ff453a' : '#f5f5f7' }}>{currentNeeds.toFixed(0)}€ / {targetNeeds.toFixed(0)}€</span>
+                      </div>
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={{ color: '#ff9f0a', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>ΕΠΙΘΥΜΙΕΣ <span style={{ opacity: 0.7 }}>30%</span></span>
+                        <span style={{ color: currentWants > targetWants ? '#ff453a' : '#f5f5f7' }}>{currentWants.toFixed(0)}€ / {targetWants.toFixed(0)}€</span>
+                      </div>
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={{ color: '#32d74b', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>ΑΠΟΤΑΜΙΕΥΣΗ <span style={{ opacity: 0.7 }}>20%</span></span>
+                        <span style={{ color: '#f5f5f7' }}>{currentSavings.toFixed(0)}€ / {targetSavings.toFixed(0)}€</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

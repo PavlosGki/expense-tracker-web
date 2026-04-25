@@ -171,6 +171,7 @@ export default function App() {
   const swipeStartRef = useRef<{ id: string; x: number } | null>(null);
   const stickyShellRef = useRef<HTMLDivElement | null>(null);
   const carouselRef = useRef<HTMLDivElement | null>(null);
+  const initialBackgroundRef = useRef<StoredBackground | null>(null);
   const activeBudgetSlideRef = useRef(Number(localStorage.getItem('expense_active_budget_slide')) || 0);
   const [activeBudgetSlide, setActiveBudgetSlide] = useState(activeBudgetSlideRef.current);
   const isDraggingRef = useRef(false);
@@ -199,6 +200,12 @@ export default function App() {
 
     return () => window.removeEventListener('click', closeTooltip);
   }, [markerTooltip]);
+
+  useEffect(() => {
+    if (backgroundModalOpen) {
+      initialBackgroundRef.current = background;
+    }
+  }, [backgroundModalOpen]);
 
   useEffect(() => {
     if (!supabase) {
@@ -3069,7 +3076,10 @@ ${descriptionsToCategorize.join('\n')}`;
 
       {/* Background Modal */}
       {backgroundModalOpen && (
-        <div className="modal-backdrop" onClick={() => setBackgroundModalOpen(false)}>
+        <div className="modal-backdrop" onClick={() => {
+          if (initialBackgroundRef.current) setBackground(initialBackgroundRef.current);
+          setBackgroundModalOpen(false);
+        }}>
           <div className="modal-card background-modal" onClick={(event) => event.stopPropagation()}>
             <h3>{t(locale, 'backgroundLibrary')}</h3>
             <div className="background-grid">
@@ -3087,11 +3097,14 @@ ${descriptionsToCategorize.join('\n')}`;
               })}
             </div>
             <div className="modal-actions">
-              <button className="ghost-btn" onClick={() => setBackground({ type: 'preset', value: 'default' })}>
-                {t(locale, 'resetBackground')}
+              <button className="ghost-btn" onClick={() => {
+                if (initialBackgroundRef.current) setBackground(initialBackgroundRef.current);
+                setBackgroundModalOpen(false);
+              }}>
+                {t(locale, 'cancel')}
               </button>
               <button className="primary-btn" onClick={() => setBackgroundModalOpen(false)}>
-                {t(locale, 'closeBackgrounds')}
+                {t(locale, 'apply')}
               </button>
             </div>
           </div>
