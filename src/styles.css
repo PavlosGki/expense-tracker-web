@@ -148,8 +148,8 @@ button {
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
-  margin: 16px -16px 0;
-  padding: 0 16px 16px;
+  margin: 16px -16px -8px;
+  padding: 0 16px 24px;
 }
 
 .budget-carousel::-webkit-scrollbar {
@@ -160,6 +160,7 @@ button {
   flex: 0 0 100%;
   scroll-snap-align: center;
   margin-top: 0 !important;
+  box-shadow: 0 4px 8px -2px rgba(0, 0, 0, 0.9), 0 8px 16px -4px rgba(0, 0, 0, 0.6), 0 12px 24px -4px rgba(0, 0, 0, 0.3);
 }
 
 .budget-panel h2,
@@ -255,7 +256,7 @@ button {
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   border: 1px solid #3a3a3c;
   z-index: 20;
   animation: fadeSlideUp 0.2s ease-out forwards;
@@ -954,6 +955,7 @@ button {
     opacity: 0;
     transform: translateY(12px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1270,8 +1272,13 @@ button {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes modalPop {
@@ -1279,6 +1286,7 @@ button {
     opacity: 0;
     transform: scale(0.96) translateY(12px);
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -1331,6 +1339,7 @@ button {
     opacity: 0;
     transform: scale(0.5) translateY(24px);
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -1383,6 +1392,7 @@ button {
     opacity: 0;
     transform: translateX(-50%) scale(0.5) translateY(24px);
   }
+
   to {
     opacity: 1;
     transform: translateX(-50%) scale(1) translateY(0);
@@ -1544,8 +1554,8 @@ select:focus-visible {
   width: 100%;
 }
 
-.input-icon-wrap > svg,
-.input-icon-wrap > .input-icon-text {
+.input-icon-wrap>svg,
+.input-icon-wrap>.input-icon-text {
   position: absolute;
   left: 14px;
   color: #8e8e93;
@@ -1624,6 +1634,7 @@ select:focus-visible {
 }
 
 @media (max-width: 900px) {
+
   .settings-grid,
   .grid-two {
     grid-template-columns: 1fr 1fr;
@@ -1639,6 +1650,7 @@ select:focus-visible {
 }
 
 @media (max-width: 720px) {
+
   .topbar,
   .panel-header,
   .balance-row,

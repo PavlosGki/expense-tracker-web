@@ -92,7 +92,7 @@ export function SettingsView(props: any) {
       <section className="panel">
         <div className="settings-header">
           <h3>{t(locale, 'projects')}</h3>
-          <button className="ghost-btn" onClick={openProjectModal}>{t(locale, 'add')}</button>
+          <button className="ghost-btn" onClick={() => openProjectModal(false)}>{t(locale, 'add')}</button>
         </div>
         <div className="category-manage-list">
           {projects.length === 0 ? (

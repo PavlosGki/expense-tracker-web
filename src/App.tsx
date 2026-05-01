@@ -48,6 +48,7 @@ import {
   extractFirstEmoji,
   getBackgroundCss,
   NEW_CATEGORY_VALUE,
+  NEW_PROJECT_VALUE,
   NO_PROJECT_VALUE,
   normalizeAmount,
   PRESET_BACKGROUNDS,
@@ -87,6 +88,7 @@ export default function App() {
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false);
   const [projectModalOpen, setProjectModalOpen] = useState(false);
+  const [projectModalForExpense, setProjectModalForExpense] = useState(false);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [analyticsModal, setAnalyticsModal] = useState<null | 'pace' | 'donut' | 'heatmap' | 'yearHeatmap' | 'weekHeatmap'>(null);
   const [activeDonutSliceName, setActiveDonutSliceName] = useState<string | null>(null);
@@ -171,7 +173,8 @@ export default function App() {
   const stickyShellRef = useRef<HTMLDivElement | null>(null);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const initialBackgroundRef = useRef<StoredBackground | null>(null);
-  const activeBudgetSlideRef = useRef(Number(localStorage.getItem('expense_active_budget_slide')) || 0);
+  const storedSlide = localStorage.getItem('expense_active_budget_slide');
+  const activeBudgetSlideRef = useRef(storedSlide !== null ? Number(storedSlide) : 1);
   const [activeBudgetSlide, setActiveBudgetSlide] = useState(activeBudgetSlideRef.current);
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
@@ -219,7 +222,7 @@ export default function App() {
   }, [showRuleTooltip]);
 
   useEffect(() => {
-    if (activeBudgetSlide === 2) {
+    if (activeBudgetSlide === 0) {
       const timer = setTimeout(() => setAnimateGauges(true), 100);
       return () => clearTimeout(timer);
     } else {
@@ -1244,8 +1247,9 @@ export default function App() {
     setEditingExpense(null);
   };
 
-  const openProjectModal = () => {
+  const openProjectModal = (fromExpense: boolean = false) => {
     setNewProjectName('');
+    setProjectModalForExpense(fromExpense);
     setProjectModalOpen(true);
   };
 
@@ -1380,8 +1384,15 @@ export default function App() {
     }
 
     setProjects((prev) => [...prev, newProject]);
+    if (projectModalForExpense) {
+      setDraft((prev) => ({
+        ...prev,
+        project: trimmedName,
+      }));
+    }
     setNewProjectName('');
     setProjectModalOpen(false);
+    setProjectModalForExpense(false);
   };
 
   const handleAddCategory = async () => {
@@ -2105,6 +2116,30 @@ ${descriptionsToCategorize.join('\n')}`;
                 }
               }}
             >
+              {/* Slide 1: 50/30/20 Gauges */}
+              <section className="panel budget-panel" style={{ display: 'flex', flexDirection: 'column' }}>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
+                  <h3 className="budget-title" style={{ margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={(e) => { e.stopPropagation(); setShowRuleTooltip(true); }}>
+                    {t(locale, 'ruleTitle')}
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="#8e8e93" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '4px' }}><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+                  </h3>
+                  {showRuleTooltip && (
+                    <div style={{ position: 'absolute', top: '24px', left: '0', width: '220px', padding: '10px', backgroundColor: '#1c1c1f', border: '1px solid #2c2c2e', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 100, color: '#f5f5f7', fontSize: '11px', lineHeight: '1.4' }} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>{t(locale, 'ruleNeeds')}:</span> {t(locale, 'ruleNeedsDesc')}</div>
+                        <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>{t(locale, 'ruleWants')}:</span> {t(locale, 'ruleWantsDesc')}</div>
+                        <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>{t(locale, 'ruleSavings')}:</span> {t(locale, 'ruleSavingsDesc')}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ flex: 1, display: 'flex', justifyContent: 'space-evenly', gap: '8px', alignItems: 'center', width: '100%' }}>
+                  {renderGauge('ruleNeeds', 50, currentNeeds, '#0a84ff', '🏠')}
+                  {renderGauge('ruleWants', 30, currentWants, '#ff9f0a', '🍕')}
+                  {renderGauge('ruleSavings', 20, currentSavings, '#32d74b', '🏦', true)}
+                </div>
+              </section>
+
               <section className="panel budget-panel">
                 <h3 
                   className="budget-title" 
@@ -2238,30 +2273,6 @@ ${descriptionsToCategorize.join('\n')}`;
                       <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7, marginLeft: '2px' }}><polyline points="9 18 15 12 9 6"></polyline></svg>
                     </span>
                   )}
-                </div>
-              </section>
-
-              {/* Slide 3: 50/30/20 Gauges */}
-              <section className="panel budget-panel" style={{ display: 'flex', flexDirection: 'column' }}>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
-                  <h3 className="budget-title" style={{ margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={(e) => { e.stopPropagation(); setShowRuleTooltip(true); }}>
-                    {t(locale, 'ruleTitle')}
-                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="#8e8e93" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '4px' }}><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
-                  </h3>
-                  {showRuleTooltip && (
-                    <div style={{ position: 'absolute', top: '24px', left: '0', width: '220px', padding: '10px', backgroundColor: '#1c1c1f', border: '1px solid #2c2c2e', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 100, color: '#f5f5f7', fontSize: '11px', lineHeight: '1.4' }} onClick={(e) => e.stopPropagation()}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>{t(locale, 'ruleNeeds')}:</span> {t(locale, 'ruleNeedsDesc')}</div>
-                        <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>{t(locale, 'ruleWants')}:</span> {t(locale, 'ruleWantsDesc')}</div>
-                        <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>{t(locale, 'ruleSavings')}:</span> {t(locale, 'ruleSavingsDesc')}</div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div style={{ flex: 1, display: 'flex', justifyContent: 'space-evenly', gap: '8px', alignItems: 'center', width: '100%' }}>
-                  {renderGauge('ruleNeeds', 50, currentNeeds, '#0a84ff', '🏠')}
-                  {renderGauge('ruleWants', 30, currentWants, '#ff9f0a', '🍕')}
-                  {renderGauge('ruleSavings', 20, currentSavings, '#32d74b', '🏦', true)}
                 </div>
               </section>
             </div>
@@ -3562,7 +3573,13 @@ ${descriptionsToCategorize.join('\n')}`;
                 <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
                 <select
                   value={draft.project || NO_PROJECT_VALUE}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, project: event.target.value === NO_PROJECT_VALUE ? '' : event.target.value }))}
+                  onChange={(event) => {
+                    if (event.target.value === NEW_PROJECT_VALUE) {
+                      openProjectModal(true);
+                      return;
+                    }
+                    setDraft((prev) => ({ ...prev, project: event.target.value === NO_PROJECT_VALUE ? '' : event.target.value }));
+                  }}
                 >
                 <option value={NO_PROJECT_VALUE}></option>
                   {projects.map((project) => (
@@ -3570,6 +3587,7 @@ ${descriptionsToCategorize.join('\n')}`;
                       {project.name}
                     </option>
                   ))}
+                  <option value={NEW_PROJECT_VALUE}>{t(locale, 'newProjectOption')}</option>
                 </select>
               </div>
             </label>
@@ -3692,7 +3710,7 @@ ${descriptionsToCategorize.join('\n')}`;
       )}
 
       {projectModalOpen && (
-        <div className="modal-backdrop" onClick={() => setProjectModalOpen(false)}>
+        <div className="modal-backdrop" onClick={() => { setProjectModalOpen(false); setProjectModalForExpense(false); }}>
           <form className="modal-card expense-form" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); handleAddProject(); }}>
             <h3>{t(locale, 'addProject')}</h3>
             <label>
@@ -3708,7 +3726,7 @@ ${descriptionsToCategorize.join('\n')}`;
               </div>
             </label>
             <div className="modal-actions">
-              <button type="button" className="ghost-btn" onClick={() => setProjectModalOpen(false)}>
+              <button type="button" className="ghost-btn" onClick={() => { setProjectModalOpen(false); setProjectModalForExpense(false); }}>
                 {t(locale, 'cancel')}
               </button>
               <button type="submit" className="primary-btn">

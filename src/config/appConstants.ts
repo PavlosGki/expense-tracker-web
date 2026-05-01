@@ -39,6 +39,7 @@ export const WANTS_CATEGORIES = [
 ];
 export const RANGE_OPTIONS: Range[] = ['day', 'week', 'month', 'year'];
 export const NEW_CATEGORY_VALUE = '__new_category__';
+export const NEW_PROJECT_VALUE = '__new_project__';
 export const NO_PROJECT_VALUE = '__no_project__';
 export const ALL_CATEGORIES_VALUE = '__all_categories__';
 export const ALL_PROJECTS_VALUE = '__all_projects__';
