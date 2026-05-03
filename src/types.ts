@@ -7,6 +7,7 @@ export type Category = {
   name: string;
   emoji: string;
   isDefault?: boolean;
+  ruleBucket?: 'needs' | 'wants' | 'savings' | 'none';
 };
 
 export type Project = {

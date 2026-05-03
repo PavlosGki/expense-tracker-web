@@ -173,8 +173,7 @@ export default function App() {
   const stickyShellRef = useRef<HTMLDivElement | null>(null);
   const carouselRef = useRef<HTMLDivElement | null>(null);
   const initialBackgroundRef = useRef<StoredBackground | null>(null);
-  const storedSlide = localStorage.getItem('expense_active_budget_slide');
-  const activeBudgetSlideRef = useRef(storedSlide !== null ? Number(storedSlide) : 1);
+  const activeBudgetSlideRef = useRef(1);
   const [activeBudgetSlide, setActiveBudgetSlide] = useState(activeBudgetSlideRef.current);
   const isDraggingRef = useRef(false);
   const startXRef = useRef(0);
@@ -189,7 +188,8 @@ export default function App() {
   const analyticsScrollLeftRef = useRef(0);
   const isClickPreventedRef = useRef(false);
   const donutListRef = useRef<HTMLDivElement | null>(null);
-  const [showRuleTooltip, setShowRuleTooltip] = useState(false);
+  const [showRuleConfigModal, setShowRuleConfigModal] = useState(false);
+  const [selectedCategoryForMove, setSelectedCategoryForMove] = useState<Category | null>(null);
   const [animateGauges, setAnimateGauges] = useState(false);
   const [ruleDetailsModal, setRuleDetailsModal] = useState<{
     labelKey: string;
@@ -212,14 +212,6 @@ export default function App() {
     return () => window.removeEventListener('click', closeTooltip);
   }, [markerTooltip]);
 
-  useEffect(() => {
-    if (!showRuleTooltip) return;
-    const closeTooltip = () => setShowRuleTooltip(false);
-    setTimeout(() => {
-      window.addEventListener('click', closeTooltip);
-    }, 0);
-    return () => window.removeEventListener('click', closeTooltip);
-  }, [showRuleTooltip]);
 
   useEffect(() => {
     if (activeBudgetSlide === 0) {
@@ -296,13 +288,15 @@ export default function App() {
   }, [tab, authLoading, session]);
 
   useEffect(() => {
-    if (tab === 'home' && carouselRef.current) {
+    if (tab === 'home' && !authLoading && carouselRef.current) {
       const el = carouselRef.current;
-      requestAnimationFrame(() => {
-        el.scrollLeft = el.clientWidth * activeBudgetSlideRef.current;
-      });
+      setTimeout(() => {
+        if (el && el.clientWidth > 0) {
+          el.scrollLeft = el.clientWidth * activeBudgetSlideRef.current;
+        }
+      }, 100);
     }
-  }, [tab]);
+  }, [tab, authLoading]);
 
   useEffect(() => {
     async function syncCloudData() {
@@ -481,7 +475,13 @@ export default function App() {
   }, [background]);
 
 
-  const allCategories = useMemo(() => [...DEFAULT_CATEGORIES, ...customCategories], [customCategories]);
+  const allCategories = useMemo(() => {
+    const customNames = new Set(customCategories.map(c => c.name));
+    return [
+      ...DEFAULT_CATEGORIES.filter(c => !customNames.has(c.name)),
+      ...customCategories
+    ];
+  }, [customCategories]);
   const displayCategories = useMemo(() => withDisplayName(locale, allCategories), [locale, allCategories]); // Ensure this is defined
   const filterFromDate = fromDate ? parseIsoDateToLocal(fromDate) : null;
   const filterToDate = toDate ? parseIsoDateToLocal(toDate) : null;
@@ -846,16 +846,18 @@ export default function App() {
     expenses.forEach(exp => {
       if (exp.date && exp.date.slice(0, 7) === todayIso) {
         const amount = Number.parseFloat(exp.amount) || 0;
-        if (NEEDS_CATEGORIES.includes(exp.category)) {
+        const catObj = allCategories.find(c => c.name === exp.category);
+        const bucket = catObj?.ruleBucket || (NEEDS_CATEGORIES.includes(exp.category) ? 'needs' : 'wants');
+
+        if (bucket === 'needs') {
           needs += amount;
-        } else {
-          // Anything not explicitly a Need is considered a Want
+        } else if (bucket === 'wants') {
           wants += amount;
         }
       }
     });
     return { needsMonthTotal: needs, wantsMonthTotal: wants };
-  }, [expenses]);
+  }, [expenses, allCategories]);
 
   const targetNeeds = parsedIncome * 0.5;
   const targetWants = parsedIncome * 0.3;
@@ -2111,27 +2113,25 @@ ${descriptionsToCategorize.join('\n')}`;
                   if (index !== activeBudgetSlideRef.current) {
                     activeBudgetSlideRef.current = index;
                     setActiveBudgetSlide(index);
-                    localStorage.setItem('expense_active_budget_slide', String(index));
                   }
                 }
               }}
             >
               {/* Slide 1: 50/30/20 Gauges */}
               <section className="panel budget-panel" style={{ display: 'flex', flexDirection: 'column' }}>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
-                  <h3 className="budget-title" style={{ margin: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={(e) => { e.stopPropagation(); setShowRuleTooltip(true); }}>
+                <div 
+                  style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', cursor: 'pointer' }}
+                  onClick={(e) => { e.stopPropagation(); setShowRuleConfigModal(true); }}
+                >
+                  <h3 className="budget-title" style={{ margin: 0 }}>
                     {t(locale, 'ruleTitle')}
-                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="#8e8e93" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '4px' }}><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
                   </h3>
-                  {showRuleTooltip && (
-                    <div style={{ position: 'absolute', top: '24px', left: '0', width: '220px', padding: '10px', backgroundColor: '#1c1c1f', border: '1px solid #2c2c2e', borderRadius: '12px', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', zIndex: 100, color: '#f5f5f7', fontSize: '11px', lineHeight: '1.4' }} onClick={(e) => e.stopPropagation()}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div><span style={{ color: '#0a84ff', fontWeight: 'bold' }}>{t(locale, 'ruleNeeds')}:</span> {t(locale, 'ruleNeedsDesc')}</div>
-                        <div><span style={{ color: '#ff9f0a', fontWeight: 'bold' }}>{t(locale, 'ruleWants')}:</span> {t(locale, 'ruleWantsDesc')}</div>
-                        <div><span style={{ color: '#32d74b', fontWeight: 'bold' }}>{t(locale, 'ruleSavings')}:</span> {t(locale, 'ruleSavingsDesc')}</div>
-                      </div>
-                    </div>
-                  )}
+                  <div style={{ padding: '4px' }}>
+                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="#8e8e93" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3"></circle>
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                  </div>
                 </div>
                 <div style={{ flex: 1, display: 'flex', justifyContent: 'space-evenly', gap: '8px', alignItems: 'center', width: '100%' }}>
                   {renderGauge('ruleNeeds', 50, currentNeeds, '#0a84ff', '🏠')}
@@ -3192,7 +3192,14 @@ ${descriptionsToCategorize.join('\n')}`;
             <h3>{t(locale, 'dateFilterTitle')}</h3>
             <div className="filter-fields">
               <label>
-                <span>{t(locale, 'from')}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: '4px' }}>
+                  <span>{t(locale, 'from')}</span>
+                  {fromDate && (
+                    <button type="button" onClick={() => setFromDate('')} style={{ background: 'transparent', border: 'none', color: '#0a84ff', fontSize: '13px', padding: 0, cursor: 'pointer', fontWeight: 500 }}>
+                      {locale === 'el' ? 'Καθαρισμός' : 'Clear'}
+                    </button>
+                  )}
+                </div>
                 <div className="input-icon-wrap">
                   <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
                   <input 
@@ -3203,7 +3210,14 @@ ${descriptionsToCategorize.join('\n')}`;
                 </div>
               </label>
               <label>
-                <span>{t(locale, 'to')}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: '4px' }}>
+                  <span>{t(locale, 'to')}</span>
+                  {toDate && (
+                    <button type="button" onClick={() => setToDate('')} style={{ background: 'transparent', border: 'none', color: '#0a84ff', fontSize: '13px', padding: 0, cursor: 'pointer', fontWeight: 500 }}>
+                      {locale === 'el' ? 'Καθαρισμός' : 'Clear'}
+                    </button>
+                  )}
+                </div>
                 <div className="input-icon-wrap">
                   <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
                   <input 
@@ -3221,7 +3235,7 @@ ${descriptionsToCategorize.join('\n')}`;
                     value={projectFilter || ALL_PROJECTS_VALUE}
                     onChange={(event) => setProjectFilter(event.target.value === ALL_PROJECTS_VALUE ? '' : event.target.value)}
                   >
-                  <option value={ALL_PROJECTS_VALUE}></option>
+                  <option value={ALL_PROJECTS_VALUE}>{t(locale, 'allProjects')}</option>
                     <option value={WITHOUT_PROJECT_VALUE}>{t(locale, 'withoutProject')}</option>
                     {projects.map((project) => (
                       <option key={project.id} value={project.name}>
@@ -3239,7 +3253,7 @@ ${descriptionsToCategorize.join('\n')}`;
                     value={categoryFilter || ALL_CATEGORIES_VALUE}
                     onChange={(event) => setCategoryFilter(event.target.value === ALL_CATEGORIES_VALUE ? '' : event.target.value)}
                   >
-                  <option value={ALL_CATEGORIES_VALUE}></option>
+                  <option value={ALL_CATEGORIES_VALUE}>{t(locale, 'allCategories')}</option>
                     {displayCategories.map((category) => (
                       <option key={category.id} value={category.name}>
                         {category.emoji} {category.displayName}
@@ -3406,7 +3420,7 @@ ${descriptionsToCategorize.join('\n')}`;
                     value={bdProject || ALL_PROJECTS_VALUE}
                     onChange={(event) => setBdProject(event.target.value === ALL_PROJECTS_VALUE ? '' : event.target.value)}
                   >
-                  <option value={ALL_PROJECTS_VALUE}></option>
+                  <option value={ALL_PROJECTS_VALUE}>{t(locale, 'allProjects')}</option>
                     <option value={WITHOUT_PROJECT_VALUE}>{t(locale, 'withoutProject')}</option>
                     {projects.map((project) => (
                       <option key={project.id} value={project.name}>
@@ -3424,7 +3438,7 @@ ${descriptionsToCategorize.join('\n')}`;
                     value={bdCategory || ALL_CATEGORIES_VALUE}
                     onChange={(event) => setBdCategory(event.target.value === ALL_CATEGORIES_VALUE ? '' : event.target.value)}
                   >
-                  <option value={ALL_CATEGORIES_VALUE}></option>
+                  <option value={ALL_CATEGORIES_VALUE}>{t(locale, 'allCategories')}</option>
                     {displayCategories.map((category) => (
                       <option key={category.id} value={category.name}>
                         {category.emoji} {category.displayName}
@@ -3581,7 +3595,7 @@ ${descriptionsToCategorize.join('\n')}`;
                     setDraft((prev) => ({ ...prev, project: event.target.value === NO_PROJECT_VALUE ? '' : event.target.value }));
                   }}
                 >
-                <option value={NO_PROJECT_VALUE}></option>
+                <option value={NO_PROJECT_VALUE}>{t(locale, 'noProject')}</option>
                   {projects.map((project) => (
                     <option key={project.id} value={project.name}>
                       {project.name}
@@ -3941,6 +3955,176 @@ ${descriptionsToCategorize.join('\n')}`;
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showRuleConfigModal && (
+        <div className="modal-backdrop" onClick={() => { setShowRuleConfigModal(false); setSelectedCategoryForMove(null); }} style={{ zIndex: 1000 }}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', padding: '24px' }}>
+            
+            {selectedCategoryForMove ? (
+              // --- MOVE CATEGORY VIEW ---
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: '24px', position: 'relative' }}>
+                  <button 
+                    onClick={() => setSelectedCategoryForMove(null)}
+                    style={{ position: 'absolute', left: '-8px', background: 'transparent', border: 'none', color: '#0a84ff', fontSize: '24px', cursor: 'pointer', padding: '0 8px' }}
+                  >
+                    ‹
+                  </button>
+                  <h2 style={{ margin: '0 auto', fontSize: '18px', textAlign: 'center' }}>
+                    {locale === 'el' ? 'Μετακίνηση' : 'Move Category'}
+                  </h2>
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', marginBottom: '32px' }}>
+                  <span style={{ fontSize: '48px' }}>{selectedCategoryForMove.emoji}</span>
+                  <span style={{ fontSize: '20px', fontWeight: 'bold' }}>{selectedCategoryForMove.displayName}</span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {['needs', 'wants', 'savings'].map((bucketStr) => {
+                    const bucket = bucketStr as 'needs' | 'wants' | 'savings';
+                    const currentBucket = selectedCategoryForMove.ruleBucket || (NEEDS_CATEGORIES.includes(selectedCategoryForMove.name) ? 'needs' : 'wants');
+                    const isCurrent = currentBucket === bucket;
+                    
+                    const colors = {
+                      needs: { bg: '#0a84ff', text: '#fff', label: t(locale, 'ruleNeeds') || 'Needs' },
+                      wants: { bg: '#ff9f0a', text: '#fff', label: t(locale, 'ruleWants') || 'Wants' },
+                      savings: { bg: '#32d74b', text: '#fff', label: t(locale, 'ruleSavings') || 'Savings' }
+                    };
+
+                    return (
+                      <button
+                        key={bucket}
+                        disabled={isCurrent}
+                        onClick={async () => {
+                          if (!user || !supabase) return;
+                          
+                          const customMatch = customCategories.find(c => c.name === selectedCategoryForMove.name);
+                          
+                          if (customMatch) {
+                            await supabase.from('categories').update({ ruleBucket: bucket }).eq('id', customMatch.id);
+                            setCustomCategories(prev => prev.map(c => c.id === customMatch.id ? { ...c, ruleBucket: bucket } : c));
+                          } else {
+                            const newCat = {
+                              id: crypto.randomUUID(),
+                              name: selectedCategoryForMove.name,
+                              emoji: selectedCategoryForMove.emoji,
+                              isDefault: false,
+                              ruleBucket: bucket,
+                              user_id: user.id
+                            };
+                            await supabase.from('categories').insert(newCat);
+                            setCustomCategories(prev => [...prev, newCat as Category]);
+                          }
+                          setSelectedCategoryForMove(null);
+                        }}
+                        style={{
+                          padding: '16px',
+                          borderRadius: '12px',
+                          border: isCurrent ? `2px solid ${colors[bucket].bg}` : 'none',
+                          background: isCurrent ? 'transparent' : colors[bucket].bg,
+                          color: colors[bucket].text,
+                          fontSize: '16px',
+                          fontWeight: 'bold',
+                          cursor: isCurrent ? 'default' : 'pointer',
+                          opacity: isCurrent ? 0.5 : 1,
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                      >
+                        {colors[bucket].label}
+                        {isCurrent && <span>✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              // --- 3 BUCKETS VIEW ---
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h2 style={{ margin: 0, fontSize: '20px' }}>{t(locale, 'ruleTitle') || '50/30/20 Rule'}</h2>
+                  <button 
+                    onClick={() => setShowRuleConfigModal(false)}
+                    style={{ background: 'transparent', border: 'none', color: '#8e8e93', fontSize: '24px', cursor: 'pointer', padding: '0 8px' }}
+                  >
+                    ×
+                  </button>
+                </div>
+                
+                <p style={{ fontSize: '14px', color: '#8e8e93', marginTop: 0, marginBottom: '24px' }}>
+                  {locale === 'el' ? 'Πάτα σε μια κατηγορία για να την μετακινήσεις.' : 'Tap a category to move it.'}
+                </p>
+
+                <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '24px', paddingRight: '4px' }}>
+                  {(() => {
+                    const buckets = [
+                      { id: 'needs', color: '#0a84ff', label: t(locale, 'ruleNeeds') || 'Needs', percent: '50%' },
+                      { id: 'wants', color: '#ff9f0a', label: t(locale, 'ruleWants') || 'Wants', percent: '30%' },
+                      { id: 'savings', color: '#32d74b', label: t(locale, 'ruleSavings') || 'Savings', percent: '20%' }
+                    ];
+
+                    return buckets.map(bucket => {
+                      const catsInBucket = displayCategories.filter(c => {
+                        const eff = c.ruleBucket || (NEEDS_CATEGORIES.includes(c.name) ? 'needs' : 'wants');
+                        return eff === bucket.id;
+                      });
+
+                      return (
+                        <div key={bucket.id} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h3 style={{ margin: 0, fontSize: '16px', color: bucket.color }}>{bucket.label}</h3>
+                            <span style={{ fontSize: '14px', color: '#8e8e93', fontWeight: 'bold' }}>{bucket.percent}</span>
+                          </div>
+                          
+                          <div style={{ 
+                            background: `rgba(${bucket.id === 'needs' ? '10,132,255' : bucket.id === 'wants' ? '255,159,10' : '50,215,75'}, 0.1)`, 
+                            borderRadius: '16px', 
+                            padding: '16px',
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '8px',
+                            minHeight: '60px'
+                          }}>
+                            {catsInBucket.length === 0 ? (
+                              <span style={{ color: '#8e8e93', fontSize: '14px', fontStyle: 'italic', margin: 'auto' }}>
+                                {locale === 'el' ? 'Καμία κατηγορία' : 'No categories'}
+                              </span>
+                            ) : (
+                              catsInBucket.map(cat => (
+                                <button
+                                  key={cat.id || cat.name}
+                                  onClick={() => setSelectedCategoryForMove(cat)}
+                                  style={{
+                                    background: 'rgba(255,255,255,0.1)',
+                                    border: '1px solid rgba(255,255,255,0.05)',
+                                    borderRadius: '20px',
+                                    padding: '6px 12px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    color: '#fff',
+                                    fontSize: '14px',
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  <span>{cat.emoji}</span>
+                                  <span>{cat.displayName}</span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </>
             )}
           </div>
         </div>
